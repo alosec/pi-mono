@@ -29,6 +29,13 @@ interface ModelsDevModel {
 	};
 }
 
+const COPILOT_STATIC_HEADERS = {
+	"User-Agent": "GitHubCopilotChat/0.35.0",
+	"Editor-Version": "vscode/1.107.0",
+	"Editor-Plugin-Version": "copilot-chat/0.35.0",
+	"Copilot-Integration-Id": "vscode-chat",
+} as const;
+
 async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 	try {
 		console.log("Fetching models from OpenRouter API...");
@@ -277,6 +284,73 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
+		// Process Mistral models
+		if (data.mistral?.models) {
+			for (const [modelId, model] of Object.entries(data.mistral.models)) {
+				const m = model as ModelsDevModel;
+				if (m.tool_call !== true) continue;
+
+				models.push({
+					id: modelId,
+					name: m.name || modelId,
+					api: "openai-completions",
+					provider: "mistral",
+					baseUrl: "https://api.mistral.ai/v1",
+					reasoning: m.reasoning === true,
+					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					cost: {
+						input: m.cost?.input || 0,
+						output: m.cost?.output || 0,
+						cacheRead: m.cost?.cache_read || 0,
+						cacheWrite: m.cost?.cache_write || 0,
+					},
+					contextWindow: m.limit?.context || 4096,
+					maxTokens: m.limit?.output || 4096,
+				});
+			}
+		}
+
+		// Process GitHub Copilot models
+		if (data["github-copilot"]?.models) {
+			for (const [modelId, model] of Object.entries(data["github-copilot"].models)) {
+				const m = model as ModelsDevModel & { status?: string };
+				if (m.tool_call !== true) continue;
+				if (m.status === "deprecated") continue;
+
+				// gpt-5 models require responses API, others use completions
+				const needsResponsesApi = modelId.startsWith("gpt-5");
+
+				const copilotModel: Model<any> = {
+					id: modelId,
+					name: m.name || modelId,
+					api: needsResponsesApi ? "openai-responses" : "openai-completions",
+					provider: "github-copilot",
+					baseUrl: "https://api.individual.githubcopilot.com",
+					reasoning: m.reasoning === true,
+					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					cost: {
+						input: m.cost?.input || 0,
+						output: m.cost?.output || 0,
+						cacheRead: m.cost?.cache_read || 0,
+						cacheWrite: m.cost?.cache_write || 0,
+					},
+					contextWindow: m.limit?.context || 128000,
+					maxTokens: m.limit?.output || 8192,
+					headers: { ...COPILOT_STATIC_HEADERS },
+					// compat only applies to openai-completions
+					...(needsResponsesApi ? {} : {
+						compat: {
+							supportsStore: false,
+							supportsDeveloperRole: false,
+							supportsReasoningEffort: false,
+						},
+					}),
+				};
+
+				models.push(copilotModel);
+			}
+		}
+
 		console.log(`Loaded ${models.length} tool-capable models from models.dev`);
 		return models;
 	} catch (error) {
@@ -432,7 +506,7 @@ export const MODELS = {
 
 	// Generate provider sections
 	for (const [providerId, models] of Object.entries(providers)) {
-		output += `\t${providerId}: {\n`;
+		output += `\t${JSON.stringify(providerId)}: {\n`;
 
 		for (const model of Object.values(models)) {
 			output += `\t\t"${model.id}": {\n`;
@@ -442,6 +516,13 @@ export const MODELS = {
 			output += `\t\t\tprovider: "${model.provider}",\n`;
 			if (model.baseUrl) {
 				output += `\t\t\tbaseUrl: "${model.baseUrl}",\n`;
+			}
+			if (model.headers) {
+				output += `\t\t\theaders: ${JSON.stringify(model.headers)},\n`;
+			}
+			if (model.compat) {
+				output += `			compat: ${JSON.stringify(model.compat)},
+`;
 			}
 			output += `\t\t\treasoning: ${model.reasoning},\n`;
 			output += `\t\t\tinput: [${model.input.map(i => `"${i}"`).join(", ")}],\n`;

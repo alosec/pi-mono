@@ -1,22 +1,20 @@
 {
 	"folders": [
 		{
-			"name": "sitegeist",
-			"path": "../sitegeist"
-		},
-		{
 			"name": "pi-mono",
 			"path": "."
 		},
 		{
-			"name": "mini-lit",
-			"path": "../mini-lit"
+			"path": "../../moms"
 		},
 		{
-			"path": "../../agent-tools/browser-tools"
+			"path": "../../.pi/agent"
 		},
 		{
-			"path": "../pi-terminal-bench"
+			"path": "../pi-skills"
+		},
+		{
+			"path": "../sitegeist"
 		}
 	],
 	"settings": {}

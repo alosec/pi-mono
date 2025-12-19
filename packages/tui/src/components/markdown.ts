@@ -40,6 +40,7 @@ export interface MarkdownTheme {
 	italic: (text: string) => string;
 	strikethrough: (text: string) => string;
 	underline: (text: string) => string;
+	highlightCode?: (code: string, lang?: string) => string[];
 }
 
 export class Markdown implements Component {
@@ -245,7 +246,9 @@ export class Markdown implements Component {
 					styledHeading = this.theme.heading(this.theme.bold(headingPrefix + headingText));
 				}
 				lines.push(styledHeading);
-				lines.push(""); // Add spacing after headings
+				if (nextTokenType !== "space") {
+					lines.push(""); // Add spacing after headings (unless space token follows)
+				}
 				break;
 			}
 
@@ -261,13 +264,22 @@ export class Markdown implements Component {
 
 			case "code": {
 				lines.push(this.theme.codeBlockBorder("```" + (token.lang || "")));
-				// Split code by newlines and style each line
-				const codeLines = token.text.split("\n");
-				for (const codeLine of codeLines) {
-					lines.push("  " + this.theme.codeBlock(codeLine));
+				if (this.theme.highlightCode) {
+					const highlightedLines = this.theme.highlightCode(token.text, token.lang);
+					for (const hlLine of highlightedLines) {
+						lines.push("  " + hlLine);
+					}
+				} else {
+					// Split code by newlines and style each line
+					const codeLines = token.text.split("\n");
+					for (const codeLine of codeLines) {
+						lines.push("  " + this.theme.codeBlock(codeLine));
+					}
 				}
 				lines.push(this.theme.codeBlockBorder("```"));
-				lines.push(""); // Add spacing after code blocks
+				if (nextTokenType !== "space") {
+					lines.push(""); // Add spacing after code blocks (unless space token follows)
+				}
 				break;
 			}
 
@@ -280,7 +292,7 @@ export class Markdown implements Component {
 			}
 
 			case "table": {
-				const tableLines = this.renderTable(token as any);
+				const tableLines = this.renderTable(token as any, width);
 				lines.push(...tableLines);
 				break;
 			}
@@ -291,13 +303,17 @@ export class Markdown implements Component {
 				for (const quoteLine of quoteLines) {
 					lines.push(this.theme.quoteBorder("│ ") + this.theme.quote(this.theme.italic(quoteLine)));
 				}
-				lines.push(""); // Add spacing after blockquotes
+				if (nextTokenType !== "space") {
+					lines.push(""); // Add spacing after blockquotes (unless space token follows)
+				}
 				break;
 			}
 
 			case "hr":
 				lines.push(this.theme.hr("─".repeat(Math.min(width, 80))));
-				lines.push(""); // Add spacing after horizontal rules
+				if (nextTokenType !== "space") {
+					lines.push(""); // Add spacing after horizontal rules (unless space token follows)
+				}
 				break;
 
 			case "html":
@@ -463,9 +479,16 @@ export class Markdown implements Component {
 			} else if (token.type === "code") {
 				// Code block in list item
 				lines.push(this.theme.codeBlockBorder("```" + (token.lang || "")));
-				const codeLines = token.text.split("\n");
-				for (const codeLine of codeLines) {
-					lines.push("  " + this.theme.codeBlock(codeLine));
+				if (this.theme.highlightCode) {
+					const highlightedLines = this.theme.highlightCode(token.text, token.lang);
+					for (const hlLine of highlightedLines) {
+						lines.push("  " + hlLine);
+					}
+				} else {
+					const codeLines = token.text.split("\n");
+					for (const codeLine of codeLines) {
+						lines.push("  " + this.theme.codeBlock(codeLine));
+					}
 				}
 				lines.push(this.theme.codeBlockBorder("```"));
 			} else {
@@ -481,57 +504,131 @@ export class Markdown implements Component {
 	}
 
 	/**
-	 * Render a table
+	 * Wrap a table cell to fit into a column.
+	 *
+	 * Delegates to wrapTextWithAnsi() so ANSI codes + long tokens are handled
+	 * consistently with the rest of the renderer.
 	 */
-	private renderTable(token: Token & { header: any[]; rows: any[][] }): string[] {
+	private wrapCellText(text: string, maxWidth: number): string[] {
+		return wrapTextWithAnsi(text, Math.max(1, maxWidth));
+	}
+
+	/**
+	 * Render a table with width-aware cell wrapping.
+	 * Cells that don't fit are wrapped to multiple lines.
+	 */
+	private renderTable(
+		token: Token & { header: any[]; rows: any[][]; raw?: string },
+		availableWidth: number,
+	): string[] {
 		const lines: string[] = [];
+		const numCols = token.header.length;
 
-		// Calculate column widths
-		const columnWidths: number[] = [];
-
-		// Check header
-		for (let i = 0; i < token.header.length; i++) {
-			const headerText = this.renderInlineTokens(token.header[i].tokens || []);
-			const width = visibleWidth(headerText);
-			columnWidths[i] = Math.max(columnWidths[i] || 0, width);
+		if (numCols === 0) {
+			return lines;
 		}
 
-		// Check rows
+		// Calculate border overhead: "│ " + (n-1) * " │ " + " │"
+		// = 2 + (n-1) * 3 + 2 = 3n + 1
+		const borderOverhead = 3 * numCols + 1;
+
+		// Minimum width for a bordered table with at least 1 char per column.
+		const minTableWidth = borderOverhead + numCols;
+		if (availableWidth < minTableWidth) {
+			// Too narrow to render a stable table. Fall back to raw markdown.
+			const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth) : [];
+			fallbackLines.push("");
+			return fallbackLines;
+		}
+
+		// Calculate natural column widths (what each column needs without constraints)
+		const naturalWidths: number[] = [];
+		for (let i = 0; i < numCols; i++) {
+			const headerText = this.renderInlineTokens(token.header[i].tokens || []);
+			naturalWidths[i] = visibleWidth(headerText);
+		}
 		for (const row of token.rows) {
 			for (let i = 0; i < row.length; i++) {
 				const cellText = this.renderInlineTokens(row[i].tokens || []);
-				const width = visibleWidth(cellText);
-				columnWidths[i] = Math.max(columnWidths[i] || 0, width);
+				naturalWidths[i] = Math.max(naturalWidths[i] || 0, visibleWidth(cellText));
 			}
 		}
 
-		// Limit column widths to reasonable max
-		const maxColWidth = 40;
-		for (let i = 0; i < columnWidths.length; i++) {
-			columnWidths[i] = Math.min(columnWidths[i], maxColWidth);
+		// Calculate column widths that fit within available width
+		const totalNaturalWidth = naturalWidths.reduce((a, b) => a + b, 0) + borderOverhead;
+		let columnWidths: number[];
+
+		if (totalNaturalWidth <= availableWidth) {
+			// Everything fits naturally
+			columnWidths = naturalWidths;
+		} else {
+			// Need to shrink columns to fit
+			const availableForCells = availableWidth - borderOverhead;
+			if (availableForCells <= numCols) {
+				// Extremely narrow - give each column at least 1 char
+				columnWidths = naturalWidths.map(() => Math.max(1, Math.floor(availableForCells / numCols)));
+			} else {
+				// Distribute space proportionally based on natural widths
+				const totalNatural = naturalWidths.reduce((a, b) => a + b, 0);
+				columnWidths = naturalWidths.map((w) => {
+					const proportion = w / totalNatural;
+					return Math.max(1, Math.floor(proportion * availableForCells));
+				});
+
+				// Adjust for rounding errors - distribute remaining space
+				const allocated = columnWidths.reduce((a, b) => a + b, 0);
+				let remaining = availableForCells - allocated;
+				for (let i = 0; remaining > 0 && i < numCols; i++) {
+					columnWidths[i]++;
+					remaining--;
+				}
+			}
 		}
 
-		// Render header
-		const headerCells = token.header.map((cell, i) => {
+		// Render top border
+		const topBorderCells = columnWidths.map((w) => "─".repeat(w));
+		lines.push("┌─" + topBorderCells.join("─┬─") + "─┐");
+
+		// Render header with wrapping
+		const headerCellLines: string[][] = token.header.map((cell, i) => {
 			const text = this.renderInlineTokens(cell.tokens || []);
-			return this.theme.bold(text.padEnd(columnWidths[i]));
+			return this.wrapCellText(text, columnWidths[i]);
 		});
-		lines.push("│ " + headerCells.join(" │ ") + " │");
+		const headerLineCount = Math.max(...headerCellLines.map((c) => c.length));
+
+		for (let lineIdx = 0; lineIdx < headerLineCount; lineIdx++) {
+			const rowParts = headerCellLines.map((cellLines, colIdx) => {
+				const text = cellLines[lineIdx] || "";
+				const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+				return this.theme.bold(padded);
+			});
+			lines.push("│ " + rowParts.join(" │ ") + " │");
+		}
 
 		// Render separator
-		const separatorCells = columnWidths.map((width) => "─".repeat(width));
+		const separatorCells = columnWidths.map((w) => "─".repeat(w));
 		lines.push("├─" + separatorCells.join("─┼─") + "─┤");
 
-		// Render rows
+		// Render rows with wrapping
 		for (const row of token.rows) {
-			const rowCells = row.map((cell, i) => {
+			const rowCellLines: string[][] = row.map((cell, i) => {
 				const text = this.renderInlineTokens(cell.tokens || []);
-				const visWidth = visibleWidth(text);
-				const padding = " ".repeat(Math.max(0, columnWidths[i] - visWidth));
-				return text + padding;
+				return this.wrapCellText(text, columnWidths[i]);
 			});
-			lines.push("│ " + rowCells.join(" │ ") + " │");
+			const rowLineCount = Math.max(...rowCellLines.map((c) => c.length));
+
+			for (let lineIdx = 0; lineIdx < rowLineCount; lineIdx++) {
+				const rowParts = rowCellLines.map((cellLines, colIdx) => {
+					const text = cellLines[lineIdx] || "";
+					return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+				});
+				lines.push("│ " + rowParts.join(" │ ") + " │");
+			}
 		}
+
+		// Render bottom border
+		const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
+		lines.push("└─" + bottomBorderCells.join("─┴─") + "─┘");
 
 		lines.push(""); // Add spacing after table
 		return lines;

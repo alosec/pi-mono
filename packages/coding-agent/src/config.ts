@@ -12,9 +12,10 @@ const __dirname = dirname(__filename);
 
 /**
  * Detect if we're running as a Bun compiled binary.
- * Bun binaries have import.meta.url containing "$bunfs" (Bun's virtual filesystem path)
+ * Bun binaries have import.meta.url containing "$bunfs", "~BUN", or "%7EBUN" (Bun's virtual filesystem path)
  */
-export const isBunBinary = import.meta.url.includes("$bunfs");
+export const isBunBinary =
+	import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN") || import.meta.url.includes("%7EBUN");
 
 // =============================================================================
 // Package Asset Paths (shipped with executable)
@@ -31,26 +32,32 @@ export function getPackageDir(): string {
 		// Bun binary: process.execPath points to the compiled executable
 		return dirname(process.execPath);
 	}
-	// Node.js: check if package.json exists in __dirname (dist/) or parent (src/ case)
-	if (existsSync(join(__dirname, "package.json"))) {
-		return __dirname;
+	// Node.js: walk up from __dirname until we find package.json
+	let dir = __dirname;
+	while (dir !== dirname(dir)) {
+		if (existsSync(join(dir, "package.json"))) {
+			return dir;
+		}
+		dir = dirname(dir);
 	}
-	// Running from src/ via tsx - go up one level to package root
-	return dirname(__dirname);
+	// Fallback (shouldn't happen)
+	return __dirname;
 }
 
 /**
  * Get path to built-in themes directory (shipped with package)
  * - For Bun binary: theme/ next to executable
- * - For Node.js (dist/): dist/theme/
- * - For tsx (src/): src/theme/
+ * - For Node.js (dist/): dist/modes/interactive/theme/
+ * - For tsx (src/): src/modes/interactive/theme/
  */
 export function getThemesDir(): string {
 	if (isBunBinary) {
 		return join(dirname(process.execPath), "theme");
 	}
-	// __dirname is either dist/ or src/ - theme is always a subdirectory
-	return join(__dirname, "theme");
+	// Theme is in modes/interactive/theme/ relative to src/ or dist/
+	const packageDir = getPackageDir();
+	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
+	return join(packageDir, srcOrDist, "modes", "interactive", "theme");
 }
 
 /** Get path to package.json */
@@ -61,6 +68,11 @@ export function getPackageJsonPath(): string {
 /** Get path to README.md */
 export function getReadmePath(): string {
 	return resolve(join(getPackageDir(), "README.md"));
+}
+
+/** Get path to docs directory */
+export function getDocsPath(): string {
+	return resolve(join(getPackageDir(), "docs"));
 }
 
 /** Get path to CHANGELOG.md */

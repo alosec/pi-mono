@@ -629,6 +629,81 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.MISTRAL_API_KEY)(
+		"Mistral Provider (devstral-medium-latest via OpenAI Completions)",
+		() => {
+			const llm = getModel("mistral", "devstral-medium-latest");
+
+			it("should complete basic text generation", async () => {
+				await basicTextGeneration(llm);
+			});
+
+			it("should handle tool calling", async () => {
+				await handleToolCall(llm);
+			});
+
+			it("should handle streaming", async () => {
+				await handleStreaming(llm);
+			});
+
+			it("should handle thinking mode", async () => {
+				// FIXME Skip for now, getting a 422 stauts code, need to test with official SDK
+				// const llm = getModel("mistral", "magistral-medium-latest");
+				// await handleThinking(llm, { reasoningEffort: "medium" });
+			});
+
+			it("should handle multi-turn with thinking and tools", async () => {
+				await multiTurn(llm, { reasoningEffort: "medium" });
+			});
+		},
+	);
+
+	describe.skipIf(!process.env.MISTRAL_API_KEY)("Mistral Provider (pixtral-12b with image support)", () => {
+		const llm = getModel("mistral", "pixtral-12b");
+
+		it("should complete basic text generation", async () => {
+			await basicTextGeneration(llm);
+		});
+
+		it("should handle tool calling", async () => {
+			await handleToolCall(llm);
+		});
+
+		it("should handle streaming", async () => {
+			await handleStreaming(llm);
+		});
+
+		it("should handle image input", async () => {
+			await handleImage(llm);
+		});
+	});
+
+	// Read GitHub Copilot token from ~/.pi/agent/oauth.json if available
+	let githubCopilotToken: string | undefined;
+	try {
+		const oauthPath = join(process.env.HOME || "", ".pi/agent/oauth.json");
+		const oauthData = JSON.parse(readFileSync(oauthPath, "utf-8"));
+		githubCopilotToken = oauthData["github-copilot"]?.access;
+	} catch {
+		// oauth.json doesn't exist or is invalid
+	}
+
+	describe.skipIf(!githubCopilotToken)("GitHub Copilot Provider (gpt-4o via OpenAI Completions)", () => {
+		const llm = getModel("github-copilot", "gpt-4o");
+
+		it("should complete basic text generation", async () => {
+			await basicTextGeneration(llm, { apiKey: githubCopilotToken });
+		});
+
+		it("should handle tool calling", async () => {
+			await handleToolCall(llm, { apiKey: githubCopilotToken });
+		});
+
+		it("should handle streaming", async () => {
+			await handleStreaming(llm, { apiKey: githubCopilotToken });
+		});
+	});
+
 	// Check if ollama is installed
 	let ollamaInstalled = false;
 	try {

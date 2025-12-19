@@ -1,3 +1,4 @@
+import { isAltBackspace, isCtrlA, isCtrlE, isCtrlK, isCtrlU, isCtrlW } from "../keys.js";
 import type { Component } from "../tui.js";
 import { visibleWidth } from "../utils.js";
 
@@ -101,15 +102,40 @@ export class Input implements Component {
 			return;
 		}
 
-		if (data === "\x01") {
+		if (isCtrlA(data)) {
 			// Ctrl+A - beginning of line
 			this.cursor = 0;
 			return;
 		}
 
-		if (data === "\x05") {
+		if (isCtrlE(data)) {
 			// Ctrl+E - end of line
 			this.cursor = this.value.length;
+			return;
+		}
+
+		if (isCtrlW(data)) {
+			// Ctrl+W - delete word backwards
+			this.deleteWordBackwards();
+			return;
+		}
+
+		if (isAltBackspace(data)) {
+			// Option/Alt+Backspace - delete word backwards
+			this.deleteWordBackwards();
+			return;
+		}
+
+		if (isCtrlU(data)) {
+			// Ctrl+U - delete from cursor to start of line
+			this.value = this.value.slice(this.cursor);
+			this.cursor = 0;
+			return;
+		}
+
+		if (isCtrlK(data)) {
+			// Ctrl+K - delete from cursor to end of line
+			this.value = this.value.slice(0, this.cursor);
 			return;
 		}
 
@@ -118,6 +144,37 @@ export class Input implements Component {
 			this.value = this.value.slice(0, this.cursor) + data + this.value.slice(this.cursor);
 			this.cursor++;
 		}
+	}
+
+	private deleteWordBackwards(): void {
+		if (this.cursor === 0) {
+			return;
+		}
+
+		const text = this.value.slice(0, this.cursor);
+		let deleteFrom = this.cursor;
+
+		const isWhitespace = (char: string): boolean => /\s/.test(char);
+		const isPunctuation = (char: string): boolean => /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/.test(char);
+
+		const charBeforeCursor = text[deleteFrom - 1] ?? "";
+
+		// If immediately on whitespace or punctuation, delete that single boundary char
+		if (isWhitespace(charBeforeCursor) || isPunctuation(charBeforeCursor)) {
+			deleteFrom -= 1;
+		} else {
+			// Otherwise, delete a run of non-boundary characters (the "word")
+			while (deleteFrom > 0) {
+				const ch = text[deleteFrom - 1] ?? "";
+				if (isWhitespace(ch) || isPunctuation(ch)) {
+					break;
+				}
+				deleteFrom -= 1;
+			}
+		}
+
+		this.value = text.slice(0, deleteFrom) + this.value.slice(this.cursor);
+		this.cursor = deleteFrom;
 	}
 
 	private handlePaste(pastedText: string): void {

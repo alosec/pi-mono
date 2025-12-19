@@ -4,6 +4,7 @@ import type {
 	AssistantMessageEvent,
 	Message,
 	Model,
+	ToolResultMessage,
 	UserMessage,
 } from "@mariozechner/pi-ai";
 
@@ -24,8 +25,9 @@ export interface Attachment {
 
 /**
  * Thinking/reasoning level for models that support it.
+ * Note: "xhigh" is only supported by OpenAI codex-max models.
  */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 /**
  * User message with optional attachments.
@@ -86,7 +88,7 @@ export type AgentEvent =
 	| { type: "agent_end"; messages: AppMessage[] }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }
-	| { type: "turn_end"; message: AppMessage; toolResults: AppMessage[] }
+	| { type: "turn_end"; message: AppMessage; toolResults: ToolResultMessage[] }
 	// Message lifecycle - emitted for user, assistant, and toolResult messages
 	| { type: "message_start"; message: AppMessage }
 	// Only emitted for assistant messages during streaming
@@ -94,4 +96,5 @@ export type AgentEvent =
 	| { type: "message_end"; message: AppMessage }
 	// Tool execution lifecycle
 	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
+	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any }
 	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };

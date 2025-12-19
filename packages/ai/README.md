@@ -9,10 +9,12 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - **OpenAI**
 - **Anthropic**
 - **Google**
+- **Mistral**
 - **Groq**
 - **Cerebras**
 - **xAI**
 - **OpenRouter**
+- **GitHub Copilot** (requires OAuth, see below)
 - **Any OpenAI-compatible API**: Ollama, vLLM, LM Studio, etc.
 
 ## Installation
@@ -194,8 +196,8 @@ const response = await complete(model, context);
 // Check for tool calls in the response
 for (const block of response.content) {
   if (block.type === 'toolCall') {
-    // Arguments are automatically validated against the TypeBox schema using AJV
-    // If validation fails, an error event is emitted
+    // Execute your tool with the arguments
+    // See "Validating Tool Arguments" section for validation
     const result = await executeWeatherApi(block.arguments);
 
     // Add tool result with text content
@@ -253,7 +255,7 @@ for await (const event of s) {
   }
 
   if (event.type === 'toolcall_end') {
-    // Here toolCall.arguments is complete and validated
+    // Here toolCall.arguments is complete (but not yet validated)
     const toolCall = event.toolCall;
     console.log(`Tool completed: ${toolCall.name}`, toolCall.arguments);
   }
@@ -267,8 +269,43 @@ for await (const event of s) {
 - Arrays may be incomplete
 - Nested objects may be partially populated
 - At minimum, `arguments` will be an empty object `{}`, never `undefined`
-- Full validation only occurs at `toolcall_end` when arguments are complete
 - The Google provider does not support function call streaming. Instead, you will receive a single `toolcall_delta` event with the full arguments.
+
+### Validating Tool Arguments
+
+When using `agentLoop`, tool arguments are automatically validated against your TypeBox schemas before execution. If validation fails, the error is returned to the model as a tool result, allowing it to retry.
+
+When implementing your own tool execution loop with `stream()` or `complete()`, use `validateToolCall` to validate arguments before passing them to your tools:
+
+```typescript
+import { stream, validateToolCall, Tool } from '@mariozechner/pi-ai';
+
+const tools: Tool[] = [weatherTool, calculatorTool];
+const s = stream(model, { messages, tools });
+
+for await (const event of s) {
+  if (event.type === 'toolcall_end') {
+    const toolCall = event.toolCall;
+
+    try {
+      // Validate arguments against the tool's schema (throws on invalid args)
+      const validatedArgs = validateToolCall(tools, toolCall);
+      const result = await executeMyTool(toolCall.name, validatedArgs);
+      // ... add tool result to context
+    } catch (error) {
+      // Validation failed - return error as tool result so model can retry
+      context.messages.push({
+        role: 'toolResult',
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        content: [{ type: 'text', text: error.message }],
+        isError: true,
+        timestamp: Date.now()
+      });
+    }
+  }
+}
+```
 
 ### Complete Event Reference
 
@@ -352,7 +389,7 @@ if (model.reasoning) {
 const response = await completeSimple(model, {
   messages: [{ role: 'user', content: 'Solve: 2x + 5 = 13' }]
 }, {
-  reasoning: 'medium'  // 'minimal' | 'low' | 'medium' | 'high'
+  reasoning: 'medium'  // 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' (xhigh maps to high on non-OpenAI providers)
 });
 
 // Access thinking and text blocks
@@ -529,7 +566,7 @@ A **provider** offers models through a specific API. For example:
 - **Anthropic** models use the `anthropic-messages` API
 - **Google** models use the `google-generative-ai` API
 - **OpenAI** models use the `openai-responses` API
-- **xAI, Cerebras, Groq, etc.** models use the `openai-completions` API (OpenAI-compatible)
+- **Mistral, xAI, Cerebras, Groq, etc.** models use the `openai-completions` API (OpenAI-compatible)
 
 ### Querying Providers and Models
 
@@ -576,6 +613,23 @@ const ollamaModel: Model<'openai-completions'> = {
   maxTokens: 32000
 };
 
+// Example: LiteLLM proxy with explicit compat settings
+const litellmModel: Model<'openai-completions'> = {
+  id: 'gpt-4o',
+  name: 'GPT-4o (via LiteLLM)',
+  api: 'openai-completions',
+  provider: 'litellm',
+  baseUrl: 'http://localhost:4000/v1',
+  reasoning: false,
+  input: ['text', 'image'],
+  cost: { input: 2.5, output: 10, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 16384,
+  compat: {
+    supportsStore: false,  // LiteLLM doesn't support the store field
+  }
+};
+
 // Example: Custom endpoint with headers (bypassing Cloudflare bot detection)
 const proxyModel: Model<'anthropic-messages'> = {
   id: 'claude-sonnet-4',
@@ -599,6 +653,25 @@ const response = await stream(ollamaModel, context, {
   apiKey: 'dummy' // Ollama doesn't need a real key
 });
 ```
+
+### OpenAI Compatibility Settings
+
+The `openai-completions` API is implemented by many providers with minor differences. By default, the library auto-detects compatibility settings based on `baseUrl` for known providers (Cerebras, xAI, Mistral, Chutes, etc.). For custom proxies or unknown endpoints, you can override these settings via the `compat` field:
+
+```typescript
+interface OpenAICompat {
+  supportsStore?: boolean;           // Whether provider supports the `store` field (default: true)
+  supportsDeveloperRole?: boolean;   // Whether provider supports `developer` role vs `system` (default: true)
+  supportsReasoningEffort?: boolean; // Whether provider supports `reasoning_effort` (default: true)
+  maxTokensField?: 'max_completion_tokens' | 'max_tokens';  // Which field name to use (default: max_completion_tokens)
+}
+```
+
+If `compat` is not set, the library falls back to URL-based detection. If `compat` is partially set, unspecified fields use the detected defaults. This is useful for:
+
+- **LiteLLM proxies**: May not support `store` field
+- **Custom inference servers**: May use non-standard field names
+- **Self-hosted endpoints**: May have different feature support
 
 ### Type Safety
 
@@ -749,10 +822,12 @@ const stream = agentLoop(
 // 5. message_start        - Assistant message starts
 // 6. message_update       - Assistant streams response with tool calls
 // 7. message_end          - Assistant message ends
-// 8. tool_execution_start - First calculation (15 * 20)
-// 9. tool_execution_end   - Result: 300
-// 10. tool_execution_start - Second calculation (30 * 40)
-// 11. tool_execution_end   - Result: 1200
+// 8. tool_execution_start  - First calculation (15 * 20)
+// 9. tool_execution_update - Streaming progress (for long-running tools)
+// 10. tool_execution_end   - Result: 300
+// 11. tool_execution_start - Second calculation (30 * 40)
+// 12. tool_execution_update - Streaming progress
+// 13. tool_execution_end   - Result: 1200
 // 12. message_start       - Tool result message for first calculation
 // 13. message_end         - Tool result message ends
 // 14. message_start       - Tool result message for second calculation
@@ -803,11 +878,16 @@ for await (const event of stream) {
       console.log(`Calling ${event.toolName} with:`, event.args);
       break;
 
+    case 'tool_execution_update':
+      // Streaming progress for long-running tools (e.g., bash output)
+      console.log(`Progress:`, event.partialResult.content);
+      break;
+
     case 'tool_execution_end':
       if (event.isError) {
         console.error(`Tool failed:`, event.result);
       } else {
-        console.log(`Tool result:`, event.result.output);
+        console.log(`Tool result:`, event.result.content);
       }
       break;
 
@@ -826,6 +906,34 @@ for await (const event of stream) {
 const messages = await stream.result();
 context.messages.push(...messages);
 ```
+
+### Continuing from Existing Context
+
+Use `agentLoopContinue` to resume an agent loop without adding a new user message. This is useful for:
+- Retrying after context overflow (after compaction reduces context size)
+- Resuming from tool results that were added manually to the context
+
+```typescript
+import { agentLoopContinue, AgentContext } from '@mariozechner/pi-ai';
+
+// Context already has messages - last must be 'user' or 'toolResult'
+const context: AgentContext = {
+  systemPrompt: 'You are helpful.',
+  messages: [userMessage, assistantMessage, toolResult],
+  tools: [myTool]
+};
+
+// Continue processing from the tool result
+const stream = agentLoopContinue(context, { model });
+
+for await (const event of stream) {
+  // Same events as agentLoop, but no user message events emitted
+}
+
+const newMessages = await stream.result();
+```
+
+**Validation**: Throws if context has no messages or if the last message is an assistant message.
 
 ### Defining Tools with TypeBox
 
@@ -846,11 +954,13 @@ const weatherTool: AgentTool<typeof weatherSchema, { temp: number }> = {
   name: 'get_weather',
   description: 'Get current weather for a city',
   parameters: weatherSchema,
-  execute: async (toolCallId, args) => {
+  execute: async (toolCallId, args, signal, onUpdate) => {
     // args is fully typed: { city: string, units: 'celsius' | 'fahrenheit' }
+    // signal: AbortSignal for cancellation
+    // onUpdate: Optional callback for streaming progress (emits tool_execution_update events)
     const temp = Math.round(Math.random() * 30);
     return {
-      output: `Temperature in ${args.city}: ${temp}°${args.units[0].toUpperCase()}`,
+      content: [{ type: 'text', text: `Temperature in ${args.city}: ${temp}°${args.units[0].toUpperCase()}` }],
       details: { temp }
     };
   }
@@ -869,6 +979,36 @@ const chartTool: AgentTool<typeof Type.Object({ data: Type.Array(Type.Number()) 
         { type: 'text', text: `Generated chart with ${args.data.length} data points` },
         { type: 'image', data: chartImage.toString('base64'), mimeType: 'image/png' }
       ]
+    };
+  }
+};
+
+// Tools can stream progress via the onUpdate callback (emits tool_execution_update events)
+const bashTool: AgentTool<typeof Type.Object({ command: Type.String() }), { exitCode: number }> = {
+  label: 'Run Bash',
+  name: 'bash',
+  description: 'Execute a bash command',
+  parameters: Type.Object({ command: Type.String() }),
+  execute: async (toolCallId, args, signal, onUpdate) => {
+    let output = '';
+    const child = spawn('bash', ['-c', args.command]);
+
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+      // Stream partial output to UI via tool_execution_update events
+      onUpdate?.({
+        content: [{ type: 'text', text: output }],
+        details: { exitCode: -1 }  // Not finished yet
+      });
+    });
+
+    const exitCode = await new Promise<number>((resolve) => {
+      child.on('close', resolve);
+    });
+
+    return {
+      content: [{ type: 'text', text: output }],
+      details: { exitCode }
     };
   }
 };
@@ -937,6 +1077,7 @@ In Node.js environments, you can set environment variables to avoid passing API 
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GEMINI_API_KEY=...
+MISTRAL_API_KEY=...
 GROQ_API_KEY=gsk_...
 CEREBRAS_API_KEY=csk-...
 XAI_API_KEY=xai-...
@@ -971,6 +1112,30 @@ setApiKey('anthropic', 'sk-ant-...');
 // Get API key for a provider (checks both programmatic and env vars)
 const key = getApiKey('openai');
 ```
+
+## GitHub Copilot
+
+GitHub Copilot is available as a provider, requiring OAuth authentication via GitHub's device flow.
+
+**Using with `@mariozechner/pi-coding-agent`**: Use `/login` and select "GitHub Copilot" to authenticate. All models are automatically enabled after login. Token stored in `~/.pi/agent/oauth.json`.
+
+**Using standalone**: If you have a valid Copilot OAuth token (e.g., from the coding agent's `oauth.json`):
+
+```typescript
+import { getModel, complete } from '@mariozechner/pi-ai';
+
+const model = getModel('github-copilot', 'gpt-4o');
+
+const response = await complete(model, {
+  messages: [{ role: 'user', content: 'Hello!' }]
+}, {
+  apiKey: 'tid=...;exp=...;proxy-ep=...'  // OAuth token from ~/.pi/agent/oauth.json
+});
+```
+
+**Note**: OAuth tokens expire and need periodic refresh. The coding agent handles this automatically.
+
+If you get "The requested model is not supported" error, enable the model manually in VS Code: open Copilot Chat, click the model selector, select the model (warning icon), and click "Enable".
 
 ## License
 

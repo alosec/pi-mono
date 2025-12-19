@@ -2,6 +2,104 @@
 
 ## [Unreleased]
 
+## [0.20.2] - 2025-12-13
+
+### Fixed
+
+- **Skill paths now use container paths**: Skill file paths in system prompt are translated to container paths (e.g., `/workspace/skills/...`) so mom can read them from inside Docker.
+
+## [0.20.1] - 2025-12-13
+
+### Added
+
+- **Skills auto-discovery**: Mom now automatically discovers skills from `workspace/skills/` and `channel/skills/` directories. Skills are directories containing a `SKILL.md` file with `name` and `description` in YAML frontmatter. Available skills are listed in the system prompt with their descriptions. Mom reads the `SKILL.md` file before using a skill.
+
+## [0.19.2] - 2025-12-12
+
+### Added
+
+- Events system: schedule wake-ups via JSON files in `workspace/events/`
+  - Immediate events: trigger when file is created (for webhooks, external signals)
+  - One-shot events: trigger at specific time (for reminders)
+  - Periodic events: trigger on cron schedule (for recurring tasks)
+- `SlackBot.enqueueEvent()` for queueing events (max 5 per channel)
+- `[SILENT]` response marker: deletes status message, posts nothing to Slack (for periodic events with nothing to report)
+- Events documentation in `docs/events.md`
+- System prompt section explaining events to mom
+
+## [0.18.8] - 2025-12-12
+
+### Changed
+
+- Timestamp prefix now includes timezone offset (`[YYYY-MM-DD HH:MM:SS+HH:MM]`)
+
+## [0.18.7] - 2025-12-12
+
+### Added
+
+- Timestamp prefix on user messages (`[YYYY-MM-DD HH:MM:SS]`) so mom knows current date/time
+
+### Fixed
+
+- Sync deduplication now strips timestamp prefix before comparing
+
+## [0.18.6] - 2025-12-12
+
+### Fixed
+
+- Duplicate message in context when message has attachments (sync from log didn't strip attachment section before comparing)
+- Use `<slack_attachments>` delimiter for attachments in messages (easier to parse/strip)
+
+## [0.18.5] - 2025-12-12
+
+### Added
+
+- `--download <channel-id>` flag to download a channel's full history including thread replies as plain text
+
+### Fixed
+
+- Error handling: when agent returns `stopReason: "error"`, main message is updated to "Sorry, something went wrong" and error details are posted to the thread
+
+## [0.18.4] - 2025-12-11
+
+### Fixed
+
+- Attachment downloads now work correctly
+  - SlackBot now receives store for processing file downloads
+  - Files are downloaded in background and stored in `<channel>/attachments/`
+  - Attachment paths passed to agent as absolute paths in execution environment
+  - Backfill also downloads attachments from historical messages
+
+## [0.18.3] - 2025-12-11
+
+### Changed
+
+- Complete rewrite of message handling architecture (#115)
+  - Now uses `AgentSession` from coding-agent for session management
+  - Brings auto-compaction, overflow handling, and proper prompt caching
+  - `log.jsonl` is the source of truth for all channel messages
+  - `context.jsonl` stores LLM context (messages sent to Claude, same format as coding-agent)
+  - Sync mechanism ensures context.jsonl stays in sync with log.jsonl at run start
+  - Session header written immediately on new session creation (not lazily)
+  - Tool results preserved in context.jsonl for multi-turn continuity
+
+- Backfill improvements
+  - Only backfills channels that already have a `log.jsonl` file
+  - Strips @mentions from backfilled messages (consistent with live messages)
+  - Uses largest timestamp in log for efficient incremental backfill
+  - Fetches DM channels in addition to public/private channels
+
+- Message handling improvements
+  - Channel chatter (messages without @mention) logged but doesn't trigger processing
+  - Messages sent while mom is busy are logged and synced on next run
+  - Pre-startup messages (replayed by Slack on reconnect) logged but not auto-processed
+  - Stop command executes immediately (not queued), can interrupt running tasks
+  - Channel @mentions no longer double-logged (was firing both app_mention and message events)
+
+- Usage summary now includes context window usage
+  - Shows current context tokens vs model's context window
+  - Example: `Context: 4.2k / 200k (2.1%)`
+
 ### Fixed
 
 - Slack API errors (msg_too_long) no longer crash the process
@@ -13,17 +111,12 @@
 - Private channel messages not being logged
   - Added `message.groups` to required bot events in README
   - Added `groups:history` and `groups:read` to required scopes in README
-  - `app_mention` handler now logs messages directly instead of relying on `message` event
-  - Added deduplication in `ChannelStore.logMessage()` to prevent double-logging
+
+- Stop command now updates "Stopping..." to "Stopped" instead of posting two messages
 
 ### Added
 
-- Message backfill on startup (#103)
-  - Fetches missed messages from Slack using `conversations.history` API when mom restarts
-  - Backfills up to 3 pages (3000 messages) per channel since last logged timestamp
-  - Includes mom's own responses and user messages (excludes other bots)
-  - Downloads attachments from backfilled messages
-  - Logs progress: channel count, per-channel message counts, total with duration
+- Port truncation logic from coding-agent: bash and read tools now use consistent 2000 lines OR 50KB limits with actionable notices
 
 ## [0.10.2] - 2025-11-27
 

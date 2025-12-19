@@ -25,6 +25,8 @@ npm run build        # Build all packages
 npm run check        # Lint, format, and type check
 ```
 
+> **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
+
 ### CI
 
 GitHub Actions runs on push to `main` and on pull requests. The workflow runs `npm run check` and `npm run test` for each package in parallel.
@@ -105,6 +107,13 @@ Complete release process:
    ```bash
    npm run publish        # Publish all packages to npm
    ```
+
+   **NPM Token Setup**: Publishing requires a granular access token with "Bypass 2FA on publish" enabled.
+   - Go to https://www.npmjs.com/settings/badlogic/tokens/
+   - Create a new "Granular Access Token"
+   - Select "Bypass 2FA on publish"
+   - Tokens expire after 90 days, so regenerate when needed
+   - Set the token: `npm config set //registry.npmjs.org/:_authToken=YOUR_TOKEN`
 
 6. **Add new [Unreleased] section** (for next development cycle):
    ```bash

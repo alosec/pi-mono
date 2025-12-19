@@ -6,12 +6,15 @@ import type {
 	ChatCompletionContentPartImage,
 	ChatCompletionContentPartText,
 	ChatCompletionMessageParam,
+	ChatCompletionToolMessageParam,
 } from "openai/resources/chat/completions.js";
 import { calculateCost } from "../models.js";
 import type {
 	AssistantMessage,
 	Context,
+	Message,
 	Model,
+	OpenAICompat,
 	StopReason,
 	StreamFunction,
 	StreamOptions,
@@ -23,12 +26,49 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { validateToolArguments } from "../utils/validation.js";
 import { transformMessages } from "./transorm-messages.js";
+
+/**
+ * Normalize tool call ID for Mistral.
+ * Mistral requires tool IDs to be exactly 9 alphanumeric characters (a-z, A-Z, 0-9).
+ */
+function normalizeMistralToolId(id: string, isMistral: boolean): string {
+	if (!isMistral) return id;
+	// Remove non-alphanumeric characters
+	let normalized = id.replace(/[^a-zA-Z0-9]/g, "");
+	// Mistral requires exactly 9 characters
+	if (normalized.length < 9) {
+		// Pad with deterministic characters based on original ID to ensure matching
+		const padding = "ABCDEFGHI";
+		normalized = normalized + padding.slice(0, 9 - normalized.length);
+	} else if (normalized.length > 9) {
+		normalized = normalized.slice(0, 9);
+	}
+	return normalized;
+}
+
+/**
+ * Check if conversation messages contain tool calls or tool results.
+ * This is needed because Anthropic (via proxy) requires the tools param
+ * to be present when messages include tool_calls or tool role messages.
+ */
+function hasToolHistory(messages: Message[]): boolean {
+	for (const msg of messages) {
+		if (msg.role === "toolResult") {
+			return true;
+		}
+		if (msg.role === "assistant") {
+			if (msg.content.some((block) => block.type === "toolCall")) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
 
 export interface OpenAICompletionsOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
-	reasoningEffort?: "minimal" | "low" | "medium" | "high";
+	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
@@ -50,6 +90,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
+				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
@@ -57,7 +98,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 		};
 
 		try {
-			const client = createClient(model, options?.apiKey);
+			const client = createClient(model, context, options?.apiKey);
 			const params = buildParams(model, context, options);
 			const openaiStream = await client.chat.completions.create(params, { signal: options?.signal });
 			stream.push({ type: "start", partial: output });
@@ -83,15 +124,6 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 						});
 					} else if (block.type === "toolCall") {
 						block.arguments = JSON.parse(block.partialArgs || "{}");
-
-						// Validate tool arguments if tool definition is available
-						if (context.tools) {
-							const tool = context.tools.find((t) => t.name === block.name);
-							if (tool) {
-								block.arguments = validateToolArguments(tool, block);
-							}
-						}
-
 						delete block.partialArgs;
 						stream.push({
 							type: "toolcall_end",
@@ -106,14 +138,18 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			for await (const chunk of openaiStream) {
 				if (chunk.usage) {
 					const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens || 0;
+					const reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens || 0;
+					const input = (chunk.usage.prompt_tokens || 0) - cachedTokens;
+					const outputTokens = (chunk.usage.completion_tokens || 0) + reasoningTokens;
 					output.usage = {
 						// OpenAI includes cached tokens in prompt_tokens, so subtract to get non-cached input
-						input: (chunk.usage.prompt_tokens || 0) - cachedTokens,
-						output:
-							(chunk.usage.completion_tokens || 0) +
-							(chunk.usage.completion_tokens_details?.reasoning_tokens || 0),
+						input,
+						output: outputTokens,
 						cacheRead: cachedTokens,
 						cacheWrite: 0,
+						// Compute totalTokens ourselves since we add reasoning_tokens to output
+						// and some providers (e.g., Groq) don't include them in total_tokens
+						totalTokens: input + outputTokens + cachedTokens,
 						cost: {
 							input: 0,
 							output: 0,
@@ -253,7 +289,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 	return stream;
 };
 
-function createClient(model: Model<"openai-completions">, apiKey?: string) {
+function createClient(model: Model<"openai-completions">, context: Context, apiKey?: string) {
 	if (!apiKey) {
 		if (!process.env.OPENAI_API_KEY) {
 			throw new Error(
@@ -262,16 +298,28 @@ function createClient(model: Model<"openai-completions">, apiKey?: string) {
 		}
 		apiKey = process.env.OPENAI_API_KEY;
 	}
+
+	const headers = { ...model.headers };
+	if (model.provider === "github-copilot") {
+		// Copilot expects X-Initiator to indicate whether the request is user-initiated
+		// or agent-initiated. It's an agent call if ANY message in history has assistant/tool role.
+		const messages = context.messages || [];
+		const isAgentCall = messages.some((msg) => msg.role === "assistant" || msg.role === "toolResult");
+		headers["X-Initiator"] = isAgentCall ? "agent" : "user";
+		headers["Openai-Intent"] = "conversation-edits";
+	}
+
 	return new OpenAI({
 		apiKey,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
-		defaultHeaders: model.headers,
+		defaultHeaders: headers,
 	});
 }
 
 function buildParams(model: Model<"openai-completions">, context: Context, options?: OpenAICompletionsOptions) {
-	const messages = convertMessages(model, context);
+	const compat = getCompat(model);
+	const messages = convertMessages(model, context, compat);
 
 	const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 		model: model.id,
@@ -280,63 +328,67 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 		stream_options: { include_usage: true },
 	};
 
-	// Cerebras/xAI/Mistral dont like the "store" field
-	if (
-		!model.baseUrl.includes("cerebras.ai") &&
-		!model.baseUrl.includes("api.x.ai") &&
-		!model.baseUrl.includes("mistral.ai") &&
-		!model.baseUrl.includes("chutes.ai")
-	) {
+	if (compat.supportsStore) {
 		params.store = false;
 	}
 
 	if (options?.maxTokens) {
-		// Mistral/Chutes uses max_tokens instead of max_completion_tokens
-		if (model.baseUrl.includes("mistral.ai") || model.baseUrl.includes("chutes.ai")) {
-			(params as any).max_tokens = options?.maxTokens;
+		if (compat.maxTokensField === "max_tokens") {
+			(params as any).max_tokens = options.maxTokens;
 		} else {
-			params.max_completion_tokens = options?.maxTokens;
+			params.max_completion_tokens = options.maxTokens;
 		}
 	}
 
 	if (options?.temperature !== undefined) {
-		params.temperature = options?.temperature;
+		params.temperature = options.temperature;
 	}
 
 	if (context.tools) {
 		params.tools = convertTools(context.tools);
+	} else if (hasToolHistory(context.messages)) {
+		// Anthropic (via LiteLLM/proxy) requires tools param when conversation has tool_calls/tool_results
+		params.tools = [];
 	}
 
 	if (options?.toolChoice) {
 		params.tool_choice = options.toolChoice;
 	}
 
-	// Grok models don't like reasoning_effort
-	if (options?.reasoningEffort && model.reasoning && !model.id.toLowerCase().includes("grok")) {
+	if (options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
 		params.reasoning_effort = options.reasoningEffort;
 	}
 
 	return params;
 }
 
-function convertMessages(model: Model<"openai-completions">, context: Context): ChatCompletionMessageParam[] {
+function convertMessages(
+	model: Model<"openai-completions">,
+	context: Context,
+	compat: Required<OpenAICompat>,
+): ChatCompletionMessageParam[] {
 	const params: ChatCompletionMessageParam[] = [];
 
 	const transformedMessages = transformMessages(context.messages, model);
 
 	if (context.systemPrompt) {
-		// Cerebras/xAi/Mistral/Chutes don't like the "developer" role
-		const useDeveloperRole =
-			model.reasoning &&
-			!model.baseUrl.includes("cerebras.ai") &&
-			!model.baseUrl.includes("api.x.ai") &&
-			!model.baseUrl.includes("mistral.ai") &&
-			!model.baseUrl.includes("chutes.ai");
+		const useDeveloperRole = model.reasoning && compat.supportsDeveloperRole;
 		const role = useDeveloperRole ? "developer" : "system";
 		params.push({ role: role, content: sanitizeSurrogates(context.systemPrompt) });
 	}
 
+	let lastRole: string | null = null;
+
 	for (const msg of transformedMessages) {
+		// Some providers (e.g. Mistral/Devstral) don't allow user messages directly after tool results
+		// Insert a synthetic assistant message to bridge the gap
+		if (compat.requiresAssistantAfterToolResult && lastRole === "toolResult" && msg.role === "user") {
+			params.push({
+				role: "assistant",
+				content: "I have processed the tool results.",
+			});
+		}
+
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				params.push({
@@ -369,32 +421,50 @@ function convertMessages(model: Model<"openai-completions">, context: Context): 
 				});
 			}
 		} else if (msg.role === "assistant") {
+			// Some providers (e.g. Mistral) don't accept null content, use empty string instead
 			const assistantMsg: ChatCompletionAssistantMessageParam = {
 				role: "assistant",
-				content: null,
+				content: compat.requiresAssistantAfterToolResult ? "" : null,
 			};
 
 			const textBlocks = msg.content.filter((b) => b.type === "text") as TextContent[];
 			if (textBlocks.length > 0) {
-				assistantMsg.content = textBlocks.map((b) => {
-					return { type: "text", text: sanitizeSurrogates(b.text) };
-				});
+				// GitHub Copilot requires assistant content as a string, not an array.
+				// Sending as array causes Claude models to re-answer all previous prompts.
+				if (model.provider === "github-copilot") {
+					assistantMsg.content = textBlocks.map((b) => sanitizeSurrogates(b.text)).join("");
+				} else {
+					assistantMsg.content = textBlocks.map((b) => {
+						return { type: "text", text: sanitizeSurrogates(b.text) };
+					});
+				}
 			}
 
-			// Handle thinking blocks for llama.cpp server + gpt-oss
+			// Handle thinking blocks
 			const thinkingBlocks = msg.content.filter((b) => b.type === "thinking") as ThinkingContent[];
 			if (thinkingBlocks.length > 0) {
-				// Use the signature from the first thinking block if available
-				const signature = thinkingBlocks[0].thinkingSignature;
-				if (signature && signature.length > 0) {
-					(assistantMsg as any)[signature] = thinkingBlocks.map((b) => b.thinking).join("\n");
+				if (compat.requiresThinkingAsText) {
+					// Convert thinking blocks to text with <thinking> delimiters
+					const thinkingText = thinkingBlocks.map((b) => `<thinking>\n${b.thinking}\n</thinking>`).join("\n");
+					const textContent = assistantMsg.content as Array<{ type: "text"; text: string }> | null;
+					if (textContent) {
+						textContent.unshift({ type: "text", text: thinkingText });
+					} else {
+						assistantMsg.content = [{ type: "text", text: thinkingText }];
+					}
+				} else {
+					// Use the signature from the first thinking block if available (for llama.cpp server + gpt-oss)
+					const signature = thinkingBlocks[0].thinkingSignature;
+					if (signature && signature.length > 0) {
+						(assistantMsg as any)[signature] = thinkingBlocks.map((b) => b.thinking).join("\n");
+					}
 				}
 			}
 
 			const toolCalls = msg.content.filter((b) => b.type === "toolCall") as ToolCall[];
 			if (toolCalls.length > 0) {
 				assistantMsg.tool_calls = toolCalls.map((tc) => ({
-					id: tc.id,
+					id: normalizeMistralToolId(tc.id, compat.requiresMistralToolIds),
 					type: "function" as const,
 					function: {
 						name: tc.name,
@@ -402,7 +472,16 @@ function convertMessages(model: Model<"openai-completions">, context: Context): 
 					},
 				}));
 			}
-			if (assistantMsg.content === null && !assistantMsg.tool_calls) {
+			// Skip assistant messages that have no content and no tool calls.
+			// Mistral explicitly requires "either content or tool_calls, but not none".
+			// Other providers also don't accept empty assistant messages.
+			// This handles aborted assistant responses that got no content.
+			const content = assistantMsg.content;
+			const hasContent =
+				content !== null &&
+				content !== undefined &&
+				(typeof content === "string" ? content.length > 0 : content.length > 0);
+			if (!hasContent && !assistantMsg.tool_calls) {
 				continue;
 			}
 			params.push(assistantMsg);
@@ -416,11 +495,16 @@ function convertMessages(model: Model<"openai-completions">, context: Context): 
 
 			// Always send tool result with text (or placeholder if only images)
 			const hasText = textResult.length > 0;
-			params.push({
+			// Some providers (e.g. Mistral) require the 'name' field in tool results
+			const toolResultMsg: ChatCompletionToolMessageParam = {
 				role: "tool",
 				content: sanitizeSurrogates(hasText ? textResult : "(see attached image)"),
-				tool_call_id: msg.toolCallId,
-			});
+				tool_call_id: normalizeMistralToolId(msg.toolCallId, compat.requiresMistralToolIds),
+			};
+			if (compat.requiresToolResultName && msg.toolName) {
+				(toolResultMsg as any).name = msg.toolName;
+			}
+			params.push(toolResultMsg);
 
 			// If there are images and model supports them, send a follow-up user message with images
 			if (hasImages && model.input.includes("image")) {
@@ -452,6 +536,8 @@ function convertMessages(model: Model<"openai-completions">, context: Context): 
 				});
 			}
 		}
+
+		lastRole = msg.role;
 	}
 
 	return params;
@@ -485,4 +571,54 @@ function mapStopReason(reason: ChatCompletionChunk.Choice["finish_reason"]): Sto
 			throw new Error(`Unhandled stop reason: ${_exhaustive}`);
 		}
 	}
+}
+
+/**
+ * Detect compatibility settings from baseUrl for known providers.
+ * Returns a fully resolved OpenAICompat object with all fields set.
+ */
+function detectCompatFromUrl(baseUrl: string): Required<OpenAICompat> {
+	const isNonStandard =
+		baseUrl.includes("cerebras.ai") ||
+		baseUrl.includes("api.x.ai") ||
+		baseUrl.includes("mistral.ai") ||
+		baseUrl.includes("chutes.ai");
+
+	const useMaxTokens = baseUrl.includes("mistral.ai") || baseUrl.includes("chutes.ai");
+
+	const isGrok = baseUrl.includes("api.x.ai");
+
+	const isMistral = baseUrl.includes("mistral.ai");
+
+	return {
+		supportsStore: !isNonStandard,
+		supportsDeveloperRole: !isNonStandard,
+		supportsReasoningEffort: !isGrok,
+		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
+		requiresToolResultName: isMistral,
+		requiresAssistantAfterToolResult: false, // Mistral no longer requires this as of Dec 2024
+		requiresThinkingAsText: isMistral,
+		requiresMistralToolIds: isMistral,
+	};
+}
+
+/**
+ * Get resolved compatibility settings for a model.
+ * Uses explicit model.compat if provided, otherwise auto-detects from URL.
+ */
+function getCompat(model: Model<"openai-completions">): Required<OpenAICompat> {
+	const detected = detectCompatFromUrl(model.baseUrl);
+	if (!model.compat) return detected;
+
+	return {
+		supportsStore: model.compat.supportsStore ?? detected.supportsStore,
+		supportsDeveloperRole: model.compat.supportsDeveloperRole ?? detected.supportsDeveloperRole,
+		supportsReasoningEffort: model.compat.supportsReasoningEffort ?? detected.supportsReasoningEffort,
+		maxTokensField: model.compat.maxTokensField ?? detected.maxTokensField,
+		requiresToolResultName: model.compat.requiresToolResultName ?? detected.requiresToolResultName,
+		requiresAssistantAfterToolResult:
+			model.compat.requiresAssistantAfterToolResult ?? detected.requiresAssistantAfterToolResult,
+		requiresThinkingAsText: model.compat.requiresThinkingAsText ?? detected.requiresThinkingAsText,
+		requiresMistralToolIds: model.compat.requiresMistralToolIds ?? detected.requiresMistralToolIds,
+	};
 }

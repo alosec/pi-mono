@@ -26,10 +26,20 @@ const _exhaustive: _CheckExhaustive = true;
 // Helper type to get options for a specific API
 export type OptionsForApi<TApi extends Api> = ApiOptionsMap[TApi];
 
-export type KnownProvider = "anthropic" | "google" | "openai" | "xai" | "groq" | "cerebras" | "openrouter" | "zai";
+export type KnownProvider =
+	| "anthropic"
+	| "google"
+	| "openai"
+	| "github-copilot"
+	| "xai"
+	| "groq"
+	| "cerebras"
+	| "openrouter"
+	| "zai"
+	| "mistral";
 export type Provider = KnownProvider | string;
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 // Base options all providers share
 export interface StreamOptions {
@@ -82,6 +92,7 @@ export interface Usage {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	totalTokens: number;
 	cost: {
 		input: number;
 		output: number;
@@ -151,6 +162,29 @@ export type AssistantMessageEvent =
 	| { type: "done"; reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
 	| { type: "error"; reason: Extract<StopReason, "aborted" | "error">; error: AssistantMessage };
 
+/**
+ * Compatibility settings for openai-completions API.
+ * Use this to override URL-based auto-detection for custom providers.
+ */
+export interface OpenAICompat {
+	/** Whether the provider supports the `store` field. Default: auto-detected from URL. */
+	supportsStore?: boolean;
+	/** Whether the provider supports the `developer` role (vs `system`). Default: auto-detected from URL. */
+	supportsDeveloperRole?: boolean;
+	/** Whether the provider supports `reasoning_effort`. Default: auto-detected from URL. */
+	supportsReasoningEffort?: boolean;
+	/** Which field to use for max tokens. Default: auto-detected from URL. */
+	maxTokensField?: "max_completion_tokens" | "max_tokens";
+	/** Whether tool results require the `name` field. Default: auto-detected from URL. */
+	requiresToolResultName?: boolean;
+	/** Whether a user message after tool results requires an assistant message in between. Default: auto-detected from URL. */
+	requiresAssistantAfterToolResult?: boolean;
+	/** Whether thinking blocks must be converted to text blocks with <thinking> delimiters. Default: auto-detected from URL. */
+	requiresThinkingAsText?: boolean;
+	/** Whether tool call IDs must be normalized to Mistral format (exactly 9 alphanumeric chars). Default: auto-detected from URL. */
+	requiresMistralToolIds?: boolean;
+}
+
 // Model interface for the unified model system
 export interface Model<TApi extends Api> {
 	id: string;
@@ -169,4 +203,6 @@ export interface Model<TApi extends Api> {
 	contextWindow: number;
 	maxTokens: number;
 	headers?: Record<string, string>;
+	/** Compatibility overrides for openai-completions API. If not set, auto-detected from baseUrl. */
+	compat?: TApi extends "openai-completions" ? OpenAICompat : never;
 }

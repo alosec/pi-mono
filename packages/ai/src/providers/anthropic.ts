@@ -25,7 +25,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { validateToolArguments } from "../utils/validation.js";
+
 import { transformMessages } from "./transorm-messages.js";
 
 /**
@@ -83,6 +83,7 @@ function convertContentBlocks(content: (TextContent | ImageContent)[]):
 export interface AnthropicOptions extends StreamOptions {
 	thinkingEnabled?: boolean;
 	thinkingBudgetTokens?: number;
+	interleavedThinking?: boolean;
 	toolChoice?: "auto" | "any" | "none" | { type: "tool"; name: string };
 }
 
@@ -105,6 +106,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
+				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
@@ -113,7 +115,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 
 		try {
 			const apiKey = options?.apiKey ?? getApiKey(model.provider) ?? "";
-			const { client, isOAuthToken } = createClient(model, apiKey);
+			const { client, isOAuthToken } = createClient(model, apiKey, options?.interleavedThinking ?? true);
 			const params = buildParams(model, context, isOAuthToken, options);
 			const anthropicStream = client.messages.stream({ ...params, stream: true }, { signal: options?.signal });
 			stream.push({ type: "start", partial: output });
@@ -129,6 +131,9 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 					output.usage.output = event.message.usage.output_tokens || 0;
 					output.usage.cacheRead = event.message.usage.cache_read_input_tokens || 0;
 					output.usage.cacheWrite = event.message.usage.cache_creation_input_tokens || 0;
+					// Anthropic doesn't provide total_tokens, compute from components
+					output.usage.totalTokens =
+						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
 				} else if (event.type === "content_block_start") {
 					if (event.content_block.type === "text") {
@@ -227,15 +232,6 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 							});
 						} else if (block.type === "toolCall") {
 							block.arguments = parseStreamingJson(block.partialJson);
-
-							// Validate tool arguments if tool definition is available
-							if (context.tools) {
-								const tool = context.tools.find((t) => t.name === block.name);
-								if (tool) {
-									block.arguments = validateToolArguments(tool, block);
-								}
-							}
-
 							delete (block as any).partialJson;
 							stream.push({
 								type: "toolcall_end",
@@ -253,6 +249,9 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 					output.usage.output = event.usage.output_tokens || 0;
 					output.usage.cacheRead = event.usage.cache_read_input_tokens || 0;
 					output.usage.cacheWrite = event.usage.cache_creation_input_tokens || 0;
+					// Anthropic doesn't provide total_tokens, compute from components
+					output.usage.totalTokens =
+						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
 				}
 			}
@@ -282,19 +281,20 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 function createClient(
 	model: Model<"anthropic-messages">,
 	apiKey: string,
+	interleavedThinking: boolean,
 ): { client: Anthropic; isOAuthToken: boolean } {
+	const betaFeatures = ["fine-grained-tool-streaming-2025-05-14"];
+	if (interleavedThinking) {
+		betaFeatures.push("interleaved-thinking-2025-05-14");
+	}
+
 	if (apiKey.includes("sk-ant-oat")) {
 		const defaultHeaders = {
 			accept: "application/json",
 			"anthropic-dangerous-direct-browser-access": "true",
-			"anthropic-beta": "oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14",
+			"anthropic-beta": `oauth-2025-04-20,${betaFeatures.join(",")}`,
 			...(model.headers || {}),
 		};
-
-		// Clear the env var if we're in Node.js to prevent SDK from using it
-		if (typeof process !== "undefined" && process.env) {
-			delete process.env.ANTHROPIC_API_KEY;
-		}
 
 		const client = new Anthropic({
 			apiKey: null,
@@ -302,6 +302,7 @@ function createClient(
 			baseURL: model.baseUrl,
 			defaultHeaders,
 			dangerouslyAllowBrowser: true,
+			maxRetries: 0, // Disable SDK retries, handled by coding-agent
 		});
 
 		return { client, isOAuthToken: true };
@@ -309,7 +310,7 @@ function createClient(
 		const defaultHeaders = {
 			accept: "application/json",
 			"anthropic-dangerous-direct-browser-access": "true",
-			"anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
+			"anthropic-beta": betaFeatures.join(","),
 			...(model.headers || {}),
 		};
 
@@ -318,6 +319,7 @@ function createClient(
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
 			defaultHeaders,
+			maxRetries: 0, // Disable SDK retries, handled by coding-agent
 		});
 
 		return { client, isOAuthToken: false };

@@ -2,6 +2,7 @@ import {
 	type AgentContext,
 	type AgentLoopConfig,
 	agentLoop,
+	agentLoopContinue,
 	type Message,
 	type UserMessage,
 } from "@mariozechner/pi-ai";
@@ -14,36 +15,56 @@ import type { AgentRunConfig, AgentTransport } from "./types.js";
  * Uses CORS proxy only for providers that require it (Anthropic OAuth, Z-AI).
  */
 export class ProviderTransport implements AgentTransport {
-	async *run(messages: Message[], userMessage: Message, cfg: AgentRunConfig, signal?: AbortSignal) {
-		// Get API key from storage
+	private async getModel(cfg: AgentRunConfig) {
 		const apiKey = await getAppStorage().providerKeys.get(cfg.model.provider);
 		if (!apiKey) {
 			throw new Error("no-api-key");
 		}
 
-		// Get proxy URL from settings (if available)
 		const proxyEnabled = await getAppStorage().settings.get<boolean>("proxy.enabled");
 		const proxyUrl = await getAppStorage().settings.get<string>("proxy.url");
-
-		// Apply proxy only if this provider/key combination requires it
 		const model = applyProxyIfNeeded(cfg.model, apiKey, proxyEnabled ? proxyUrl || undefined : undefined);
 
-		// Messages are already LLM-compatible (filtered by Agent)
-		const context: AgentContext = {
+		return model;
+	}
+
+	private buildContext(messages: Message[], cfg: AgentRunConfig): AgentContext {
+		return {
 			systemPrompt: cfg.systemPrompt,
 			messages,
 			tools: cfg.tools,
 		};
+	}
 
-		const pc: AgentLoopConfig = {
+	private buildLoopConfig(model: AgentRunConfig["model"], cfg: AgentRunConfig): AgentLoopConfig {
+		return {
 			model,
 			reasoning: cfg.reasoning,
-			apiKey,
+			// Resolve API key per assistant response (important for expiring OAuth tokens)
+			getApiKey: async (provider: string) => {
+				const key = await getAppStorage().providerKeys.get(provider);
+				return key ?? undefined; // Convert null to undefined for type compatibility
+			},
 			getQueuedMessages: cfg.getQueuedMessages,
 		};
+	}
 
-		// Yield events from agentLoop
+	async *run(messages: Message[], userMessage: Message, cfg: AgentRunConfig, signal?: AbortSignal) {
+		const model = await this.getModel(cfg);
+		const context = this.buildContext(messages, cfg);
+		const pc = this.buildLoopConfig(model, cfg);
+
 		for await (const ev of agentLoop(userMessage as unknown as UserMessage, context, pc, signal)) {
+			yield ev;
+		}
+	}
+
+	async *continue(messages: Message[], cfg: AgentRunConfig, signal?: AbortSignal) {
+		const model = await this.getModel(cfg);
+		const context = this.buildContext(messages, cfg);
+		const pc = this.buildLoopConfig(model, cfg);
+
+		for await (const ev of agentLoopContinue(context, pc, signal)) {
 			yield ev;
 		}
 	}

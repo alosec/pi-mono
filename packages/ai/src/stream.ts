@@ -1,3 +1,4 @@
+import { ThinkingLevel } from "@google/genai";
 import { type AnthropicOptions, streamAnthropic } from "./providers/anthropic.js";
 import { type GoogleOptions, streamGoogle } from "./providers/google.js";
 import { type OpenAICompletionsOptions, streamOpenAICompletions } from "./providers/openai-completions.js";
@@ -30,6 +31,10 @@ export function getApiKey(provider: any): string | undefined {
 	if (key) return key;
 
 	// Fall back to environment variables
+	if (provider === "github-copilot") {
+		return process.env.COPILOT_GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+	}
+
 	const envMap: Record<string, string> = {
 		openai: "OPENAI_API_KEY",
 		anthropic: "ANTHROPIC_API_KEY",
@@ -39,6 +44,7 @@ export function getApiKey(provider: any): string | undefined {
 		xai: "XAI_API_KEY",
 		openrouter: "OPENROUTER_API_KEY",
 		zai: "ZAI_API_KEY",
+		mistral: "MISTRAL_API_KEY",
 	};
 
 	const envVar = envMap[provider];
@@ -122,9 +128,15 @@ function mapOptionsForApi<TApi extends Api>(
 		apiKey: apiKey || options?.apiKey,
 	};
 
+	// Helper to clamp xhigh to high for providers that don't support it
+	const clampReasoning = (effort: ReasoningEffort | undefined) => (effort === "xhigh" ? "high" : effort);
+
 	switch (model.api) {
 		case "anthropic-messages": {
-			if (!options?.reasoning) return base satisfies AnthropicOptions;
+			// Explicitly disable thinking when reasoning is not specified
+			if (!options?.reasoning) {
+				return { ...base, thinkingEnabled: false } satisfies AnthropicOptions;
+			}
 
 			const anthropicBudgets = {
 				minimal: 1024,
@@ -136,7 +148,7 @@ function mapOptionsForApi<TApi extends Api>(
 			return {
 				...base,
 				thinkingEnabled: true,
-				thinkingBudgetTokens: anthropicBudgets[options.reasoning],
+				thinkingBudgetTokens: anthropicBudgets[clampReasoning(options.reasoning)!],
 			} satisfies AnthropicOptions;
 		}
 
@@ -153,14 +165,32 @@ function mapOptionsForApi<TApi extends Api>(
 			} satisfies OpenAIResponsesOptions;
 
 		case "google-generative-ai": {
-			if (!options?.reasoning) return base as any;
+			// Explicitly disable thinking when reasoning is not specified
+			// This is needed because Gemini has "dynamic thinking" enabled by default
+			if (!options?.reasoning) {
+				return { ...base, thinking: { enabled: false } } satisfies GoogleOptions;
+			}
 
-			const googleBudget = getGoogleBudget(model as Model<"google-generative-ai">, options.reasoning);
+			const googleModel = model as Model<"google-generative-ai">;
+			const effort = clampReasoning(options.reasoning)!;
+
+			// Gemini 3 models use thinkingLevel exclusively instead of thinkingBudget.
+			// https://ai.google.dev/gemini-api/docs/thinking#set-budget
+			if (isGemini3ProModel(googleModel) || isGemini3FlashModel(googleModel)) {
+				return {
+					...base,
+					thinking: {
+						enabled: true,
+						level: getGemini3ThinkingLevel(effort, googleModel),
+					},
+				} satisfies GoogleOptions;
+			}
+
 			return {
 				...base,
 				thinking: {
 					enabled: true,
-					budgetTokens: googleBudget,
+					budgetTokens: getGoogleBudget(googleModel, effort),
 				},
 			} satisfies GoogleOptions;
 		}
@@ -173,10 +203,47 @@ function mapOptionsForApi<TApi extends Api>(
 	}
 }
 
-function getGoogleBudget(model: Model<"google-generative-ai">, effort: ReasoningEffort): number {
+type ClampedReasoningEffort = Exclude<ReasoningEffort, "xhigh">;
+
+function isGemini3ProModel(model: Model<"google-generative-ai">): boolean {
+	// Covers gemini-3-pro, gemini-3-pro-preview, and possible other prefixed ids in the future
+	return model.id.includes("3-pro");
+}
+
+function isGemini3FlashModel(model: Model<"google-generative-ai">): boolean {
+	// Covers gemini-3-flash, gemini-3-flash-preview, and possible other prefixed ids in the future
+	return model.id.includes("3-flash");
+}
+
+function getGemini3ThinkingLevel(effort: ClampedReasoningEffort, model: Model<"google-generative-ai">): ThinkingLevel {
+	if (isGemini3ProModel(model)) {
+		// Gemini 3 Pro only supports LOW/HIGH (for now)
+		switch (effort) {
+			case "minimal":
+			case "low":
+				return ThinkingLevel.LOW;
+			case "medium":
+			case "high":
+				return ThinkingLevel.HIGH;
+		}
+	}
+	// Gemini 3 Flash supports all four levels
+	switch (effort) {
+		case "minimal":
+			return ThinkingLevel.MINIMAL;
+		case "low":
+			return ThinkingLevel.LOW;
+		case "medium":
+			return ThinkingLevel.MEDIUM;
+		case "high":
+			return ThinkingLevel.HIGH;
+	}
+}
+
+function getGoogleBudget(model: Model<"google-generative-ai">, effort: ClampedReasoningEffort): number {
 	// See https://ai.google.dev/gemini-api/docs/thinking#set-budget
 	if (model.id.includes("2.5-pro")) {
-		const budgets = {
+		const budgets: Record<ClampedReasoningEffort, number> = {
 			minimal: 128,
 			low: 2048,
 			medium: 8192,
@@ -187,7 +254,7 @@ function getGoogleBudget(model: Model<"google-generative-ai">, effort: Reasoning
 
 	if (model.id.includes("2.5-flash")) {
 		// Covers 2.5-flash-lite as well
-		const budgets = {
+		const budgets: Record<ClampedReasoningEffort, number> = {
 			minimal: 128,
 			low: 2048,
 			medium: 8192,

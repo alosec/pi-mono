@@ -1,53 +1,65 @@
 # pi
 
-A radically simple and opinionated coding agent with multi-model support (including mid-session switching), a simple yet powerful CLI for headless coding tasks, and many creature comforts you might be used to from other coding agents.
+A terminal-based coding agent with multi-model support, mid-session model switching, and a simple CLI for headless coding tasks.
 
-Works on Linux, macOS, and Windows (barely tested, needs Git Bash running in the "modern" Windows Terminal).
+Works on Linux, macOS, and Windows (requires bash; see [Windows Setup](#windows-setup)).
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [API Keys](#api-keys)
-- [OAuth Authentication (Optional)](#oauth-authentication-optional)
-- [Custom Models and Providers](#custom-models-and-providers)
-- [Themes](#themes)
-- [Slash Commands](#slash-commands)
-- [Editor Features](#editor-features)
-- [Project Context Files](#project-context-files)
-- [Image Support](#image-support)
-- [Session Management](#session-management)
-- [Context Compaction](#context-compaction)
-- [CLI Options](#cli-options)
-- [Tools](#tools)
+- [Getting Started](#getting-started)
+  - [Installation](#installation)
+  - [Windows Setup](#windows-setup)
+  - [API Keys & OAuth](#api-keys--oauth)
+  - [Quick Start](#quick-start)
 - [Usage](#usage)
-- [Security (YOLO by default)](#security-yolo-by-default)
-- [Sub-Agents](#sub-agents)
-- [To-Dos](#to-dos)
-- [Planning](#planning)
-- [Background Bash](#background-bash)
+  - [Slash Commands](#slash-commands)
+  - [Editor Features](#editor-features)
+  - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Bash Mode](#bash-mode)
+  - [Image Support](#image-support)
+- [Sessions](#sessions)
+  - [Session Management](#session-management)
+  - [Context Compaction](#context-compaction)
+  - [Branching](#branching)
+- [Configuration](#configuration)
+  - [Project Context Files](#project-context-files)
+  - [Custom Models and Providers](#custom-models-and-providers)
+  - [Themes](#themes)
+  - [Custom Slash Commands](#custom-slash-commands)
+  - [Skills](#skills)
+  - [Hooks](#hooks)
+  - [Custom Tools](#custom-tools)
+  - [Settings File](#settings-file)
+- [CLI Reference](#cli-reference)
+- [Tools](#tools)
+- [Programmatic Usage](#programmatic-usage)
+- [Philosophy](#philosophy)
+- [Development](#development)
 - [License](#license)
-- [See Also](#see-also)
 
-## Installation
+---
 
-### npm (recommended)
+## Getting Started
+
+### Installation
+
+**npm (recommended):**
 
 ```bash
 npm install -g @mariozechner/pi-coding-agent
 ```
 
-### Standalone Binary
+**Standalone binary:**
 
-Pre-built binaries are available on the [GitHub Releases](https://github.com/badlogic/pi-mono/releases) page. Download the archive for your platform:
+Download from [GitHub Releases](https://github.com/badlogic/pi-mono/releases):
 
-- `pi-darwin-arm64.tar.gz` - macOS Apple Silicon
-- `pi-darwin-x64.tar.gz` - macOS Intel
-- `pi-linux-x64.tar.gz` - Linux x64
-- `pi-linux-arm64.tar.gz` - Linux ARM64
-- `pi-windows-x64.zip` - Windows x64
-
-Extract and run:
+| Platform | Archive |
+|----------|---------|
+| macOS Apple Silicon | `pi-darwin-arm64.tar.gz` |
+| macOS Intel | `pi-darwin-x64.tar.gz` |
+| Linux x64 | `pi-linux-x64.tar.gz` |
+| Linux ARM64 | `pi-linux-arm64.tar.gz` |
+| Windows x64 | `pi-windows-x64.zip` |
 
 ```bash
 # macOS/Linux
@@ -59,112 +71,293 @@ unzip pi-windows-x64.zip
 pi.exe
 ```
 
-The archive includes the binary plus supporting files (README, CHANGELOG, themes). Keep them together in the same directory.
+**macOS note:** The binary is unsigned. If blocked, run: `xattr -c ./pi`
 
-**macOS users**: The binary is not signed. macOS may block it on first run. To fix:
-```bash
-xattr -c ./pi
-```
-
-### Build Binary from Source
-
-Requires [Bun](https://bun.sh) 1.0+:
+**Build from source** (requires [Bun](https://bun.sh) 1.0+):
 
 ```bash
 git clone https://github.com/badlogic/pi-mono.git
-cd pi-mono
-npm install
-cd packages/coding-agent
-npm run build:binary
-
-# Binary and supporting files are in dist/
+cd pi-mono && npm install
+cd packages/coding-agent && npm run build:binary
 ./dist/pi
 ```
 
-## Quick Start
+### Windows Setup
+
+Pi requires a bash shell on Windows. Checked locations (in order):
+
+1. Custom path from `~/.pi/agent/settings.json`
+2. Git Bash (`C:\Program Files\Git\bin\bash.exe`)
+3. `bash.exe` on PATH (Cygwin, MSYS2, WSL)
+
+For most users, [Git for Windows](https://git-scm.com/download/win) is sufficient.
+
+**Custom shell path:**
+
+```json
+// ~/.pi/agent/settings.json
+{
+  "shellPath": "C:\\cygwin64\\bin\\bash.exe"
+}
+```
+
+### API Keys & OAuth
+
+Set the environment variable for your provider:
+
+| Provider | Environment Variable |
+|----------|---------------------|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google | `GEMINI_API_KEY` |
+| Mistral | `MISTRAL_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| Cerebras | `CEREBRAS_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| ZAI | `ZAI_API_KEY` |
+
+**Anthropic OAuth (Claude Pro/Max):**
 
 ```bash
-# Set your API key (see API Keys section)
-export ANTHROPIC_API_KEY=sk-ant-...
+pi
+/login  # Select "Anthropic (Claude Pro/Max)", authorize in browser
+```
 
-# Start the interactive CLI
+Tokens stored in `~/.pi/agent/oauth.json`. Use `/logout` to clear.
+
+**GitHub Copilot OAuth:**
+
+```bash
+pi
+/login  # Select "GitHub Copilot", authorize in browser
+```
+
+Press Enter to use github.com, or enter your GitHub Enterprise Server domain (e.g., `github.mycompany.com`).
+
+If you get "The requested model is not supported" error, enable the model in VS Code: Copilot Chat → model selector → select model → "Enable".
+
+Tokens stored in `~/.pi/agent/oauth.json`. Use `/logout` to clear.
+
+### Quick Start
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
 pi
 ```
 
-Once in the CLI, you can chat with the AI:
+Then chat:
 
 ```
 You: Create a simple Express server in src/server.ts
 ```
 
-The agent will use its tools to read, write, and edit files as needed, and execute commands via Bash.
+The agent reads, writes, and edits files, and executes commands via bash.
 
-## API Keys
+---
 
-The CLI supports multiple LLM providers. Set the appropriate environment variable for your chosen provider:
+## Usage
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/model` | Switch models mid-session (fuzzy search, arrow keys, Enter to select) |
+| `/thinking` | Adjust thinking level for reasoning models (off/minimal/low/medium/high) |
+| `/queue` | Set message queue mode: one-at-a-time (default) or all-at-once |
+| `/export [file]` | Export session to self-contained HTML |
+| `/session` | Show session info: path, message counts, token usage, cost |
+| `/hotkeys` | Show all keyboard shortcuts |
+| `/changelog` | Display full version history |
+| `/branch` | Create new conversation branch from a previous message |
+| `/resume` | Switch to a different session (interactive selector) |
+| `/login` | OAuth login for subscription-based models |
+| `/logout` | Clear OAuth tokens |
+| `/clear` | Clear context and start fresh session |
+| `/copy` | Copy last agent message to clipboard |
+| `/compact [instructions]` | Manually compact conversation context |
+| `/autocompact` | Toggle automatic context compaction |
+| `/theme` | Select color theme |
+| `/show-images` | Toggle inline image display (supported terminals only) |
+
+### Editor Features
+
+**File reference (`@`):** Type `@` to fuzzy-search project files. Respects `.gitignore`.
+
+**Path completion (Tab):** Complete relative paths, `../`, `~/`, etc.
+
+**Drag & drop:** Drag files from your file manager into the terminal.
+
+**Multi-line paste:** Pasted content is collapsed to `[paste #N <lines> lines]` but sent in full.
+
+**Message queuing:** Submit messages while the agent is working. They queue and process based on `/queue` mode. Press Escape to abort and restore queued messages to editor.
+
+### Keyboard Shortcuts
+
+**Navigation:**
+
+| Key | Action |
+|-----|--------|
+| Arrow keys | Move cursor / browse history (Up when empty) |
+| Option+Left/Right | Move by word |
+| Ctrl+A / Home / Cmd+Left | Start of line |
+| Ctrl+E / End / Cmd+Right | End of line |
+
+**Editing:**
+
+| Key | Action |
+|-----|--------|
+| Enter | Send message |
+| Shift+Enter / Alt+Enter | New line (Ctrl+Enter on WSL) |
+| Ctrl+W / Option+Backspace | Delete word backwards |
+| Ctrl+U | Delete to start of line |
+| Ctrl+K | Delete to end of line |
+
+**Other:**
+
+| Key | Action |
+|-----|--------|
+| Tab | Path completion / accept autocomplete |
+| Escape | Cancel autocomplete / abort streaming |
+| Ctrl+C | Clear editor (first) / exit (second) |
+| Ctrl+D | Exit (when editor is empty) |
+| Shift+Tab | Cycle thinking level |
+| Ctrl+P | Cycle models (scoped by `--models`) |
+| Ctrl+O | Toggle tool output expansion |
+| Ctrl+T | Toggle thinking block visibility |
+
+### Bash Mode
+
+Prefix commands with `!` to execute them and add output to context:
+
+```
+!ls -la
+!git status
+!cat package.json | jq '.dependencies'
+```
+
+Output streams in real-time. Press Escape to cancel. Large outputs truncate at 2000 lines / 50KB.
+
+The output becomes part of your next prompt, formatted as:
+
+```
+Ran `ls -la`
+```
+<output here>
+```
+```
+
+Run multiple commands before prompting; all outputs are included together.
+
+### Image Support
+
+**Attaching images:** Include image paths in your message:
+
+```
+You: What's in this screenshot? /path/to/image.png
+```
+
+Supported formats: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`
+
+**Inline rendering:** On terminals that support the Kitty graphics protocol (Kitty, Ghostty, WezTerm) or iTerm2 inline images, images in tool output are rendered inline. On unsupported terminals, a text placeholder is shown instead.
+
+Toggle inline images with `/show-images` or set `terminal.showImages: false` in settings.
+
+---
+
+## Sessions
+
+### Session Management
+
+Sessions auto-save to `~/.pi/agent/sessions/` organized by working directory.
 
 ```bash
-# Anthropic (Claude)
-export ANTHROPIC_API_KEY=sk-ant-...
-# Or use OAuth token (retrieved via: claude setup-token)
-export ANTHROPIC_OAUTH_TOKEN=...
+pi --continue      # Continue most recent session
+pi -c              # Short form
 
-# OpenAI (GPT)
-export OPENAI_API_KEY=sk-...
+pi --resume        # Browse and select from past sessions
+pi -r              # Short form
 
-# Google (Gemini)
-export GEMINI_API_KEY=...
+pi --no-session    # Ephemeral mode (don't save)
 
-# Groq
-export GROQ_API_KEY=gsk_...
-
-# Cerebras
-export CEREBRAS_API_KEY=csk-...
-
-# xAI (Grok)
-export XAI_API_KEY=xai-...
-
-# OpenRouter
-export OPENROUTER_API_KEY=sk-or-...
-
-# ZAI
-export ZAI_API_KEY=...
+pi --session /path/to/file.jsonl  # Use specific session file
 ```
 
-If no API key is set, the CLI will prompt you to configure one on first run.
+### Context Compaction
 
-**Note:** The `/model` command only shows models for which API keys are configured in your environment. If you don't see a model you expect, check that you've set the corresponding environment variable.
+Long sessions can exhaust context windows. Compaction summarizes older messages while keeping recent ones.
 
-## OAuth Authentication (Optional)
+**Manual:** `/compact` or `/compact Focus on the API changes`
 
-If you have a Claude Pro/Max subscription, you can use OAuth instead of API keys:
+**Automatic:** Enable with `/autocompact`. When enabled, triggers in two cases:
+- **Overflow recovery**: LLM returns context overflow error. Compacts and auto-retries.
+- **Threshold maintenance**: Context exceeds `contextWindow - reserveTokens` after a successful turn. Compacts without retry.
 
-```bash
-pi
-# In the interactive session:
-/login
-# Select "Anthropic (Claude Pro/Max)"
-# Authorize in browser
-# Paste authorization code
+When disabled, neither case triggers automatic compaction (use `/compact` manually if needed).
+
+**How it works:**
+1. Cut point calculated to keep ~20k tokens of recent messages
+2. Messages before cut point are summarized
+3. Summary replaces old messages as "context handoff"
+4. Previous compaction summaries chain into new ones
+
+Compaction does not create a new session, but continues the existing one, with a marker in the `.jsonl` file that encodes the compaction point.
+
+**Configuration** (`~/.pi/agent/settings.json`):
+
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  }
+}
 ```
 
-This gives you:
-- Free access to Claude models (included in your subscription)
-- No need to manage API keys
-- Automatic token refresh
+> **Note:** Compaction is lossy. The agent loses full conversation access afterward. Size tasks to avoid context limits when possible. For critical context, ask the agent to write a summary to a file, iterate on it until it covers everything, then start a new session with that file. The full session history is preserved in the JSONL file; use `/branch` to revisit any previous point.
 
-To logout:
+### Branching
+
+Use `/branch` to explore alternative conversation paths:
+
+1. Opens selector showing all your user messages
+2. Select a message to branch from
+3. Creates new session with history up to that point
+4. Selected message placed in editor for modification
+
+---
+
+## Configuration
+
+### Project Context Files
+
+Pi loads `AGENTS.md` (or `CLAUDE.md`) files at startup in this order:
+
+1. **Global:** `~/.pi/agent/AGENTS.md`
+2. **Parent directories:** Walking up from current directory
+3. **Current directory:** `./AGENTS.md`
+
+Use these for:
+- Project instructions and guidelines
+- Common commands and workflows
+- Architecture documentation
+- Coding conventions
+- Testing instructions
+
+```markdown
+# Common Commands
+- npm run build: Build the project
+- npm test: Run tests
+
+# Code Style
+- Use TypeScript strict mode
+- Prefer async/await over promises
 ```
-/logout
-```
 
-**Note:** OAuth tokens are stored in `~/.pi/agent/oauth.json` with restricted permissions (0600).
+### Custom Models and Providers
 
-## Custom Models and Providers
-
-You can add custom models and providers (like Ollama, vLLM, LM Studio, or any custom API endpoint) via `~/.pi/agent/models.json`. Supports OpenAI-compatible APIs (`openai-completions`, `openai-responses`), Anthropic Messages API (`anthropic-messages`), and Google Generative AI API (`google-generative-ai`). This file is loaded fresh every time you open the `/model` selector, allowing live updates without restarting.
-
-### Configuration File Structure
+Add custom models (Ollama, vLLM, LM Studio, etc.) via `~/.pi/agent/models.json`:
 
 ```json
 {
@@ -184,78 +377,18 @@ You can add custom models and providers (like Ollama, vLLM, LM Studio, or any cu
           "maxTokens": 32000
         }
       ]
-    },
-    "vllm": {
-      "baseUrl": "http://your-server:8000/v1",
-      "apiKey": "VLLM_API_KEY",
-      "api": "openai-completions",
-      "models": [
-        {
-          "id": "custom-model",
-          "name": "Custom Fine-tuned Model",
-          "reasoning": false,
-          "input": ["text", "image"],
-          "cost": {"input": 0.5, "output": 1.0, "cacheRead": 0, "cacheWrite": 0},
-          "contextWindow": 32768,
-          "maxTokens": 8192
-        }
-      ]
-    },
-    "mixed-api-provider": {
-      "baseUrl": "https://api.example.com/v1",
-      "apiKey": "CUSTOM_API_KEY",
-      "api": "openai-completions",
-      "models": [
-        {
-          "id": "legacy-model",
-          "name": "Legacy Model",
-          "reasoning": false,
-          "input": ["text"],
-          "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0, "cacheWrite": 0},
-          "contextWindow": 8192,
-          "maxTokens": 4096
-        },
-        {
-          "id": "new-model",
-          "name": "New Model",
-          "api": "openai-responses",
-          "reasoning": true,
-          "input": ["text", "image"],
-          "cost": {"input": 0.5, "output": 1.0, "cacheRead": 0.1, "cacheWrite": 0.2},
-          "contextWindow": 128000,
-          "maxTokens": 32000
-        }
-      ]
     }
   }
 }
 ```
 
-### API Key Resolution
+**Supported APIs:** `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`
 
-The `apiKey` field can be either an environment variable name or a literal API key:
+**API key resolution:** The `apiKey` field is checked as environment variable name first, then used as literal value.
 
-1. First, `pi` checks if an environment variable with that name exists
-2. If found, uses the environment variable's value
-3. Otherwise, treats it as a literal API key
+**API override:** Set `api` at provider level (default for all models) or model level (override per model).
 
-Examples:
-- `"apiKey": "OLLAMA_API_KEY"` → checks `$OLLAMA_API_KEY`, then treats as literal "OLLAMA_API_KEY"
-- `"apiKey": "sk-1234..."` → checks `$sk-1234...` (unlikely to exist), then uses literal value
-
-This allows both secure env var usage and literal keys for local servers.
-
-### API Override
-
-- **Provider-level `api`**: Sets the default API for all models in that provider
-- **Model-level `api`**: Overrides the provider default for specific models
-- Supported APIs: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`
-
-This is useful when a provider supports multiple API standards through the same base URL.
-
-### Custom Headers
-
-You can add custom HTTP headers to bypass Cloudflare bot detection, add authentication tokens, or meet other proxy requirements:
+**Custom headers:**
 
 ```json
 {
@@ -265,283 +398,67 @@ You can add custom HTTP headers to bypass Cloudflare bot detection, add authenti
       "apiKey": "YOUR_API_KEY",
       "api": "anthropic-messages",
       "headers": {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "X-Custom-Auth": "bearer-token-here"
+        "User-Agent": "Mozilla/5.0 ...",
+        "X-Custom-Auth": "token"
       },
-      "models": [
-        {
-          "id": "claude-sonnet-4",
-          "name": "Claude Sonnet 4 (Proxied)",
-          "reasoning": true,
-          "input": ["text", "image"],
-          "cost": {"input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75},
-          "contextWindow": 200000,
-          "maxTokens": 8192,
-          "headers": {
-            "X-Model-Specific-Header": "value"
-          }
-        }
-      ]
+      "models": [...]
     }
   }
 }
 ```
 
-- **Provider-level `headers`**: Applied to all requests for models in that provider
-- **Model-level `headers`**: Additional headers for specific models (merged with provider headers)
-- Model headers override provider headers when keys conflict
+**Authorization header:** Set `authHeader: true` to add `Authorization: Bearer <apiKey>` automatically.
 
-### Model Selection Priority
+**OpenAI compatibility (`compat` field):**
 
-When starting `pi`, models are selected in this order:
+| Field | Description |
+|-------|-------------|
+| `supportsStore` | Whether provider supports `store` field |
+| `supportsDeveloperRole` | Use `developer` vs `system` role |
+| `supportsReasoningEffort` | Support for `reasoning_effort` parameter |
+| `maxTokensField` | Use `max_completion_tokens` or `max_tokens` |
 
-1. **CLI args**: `--provider` and `--model` flags
-2. **First from `--models` scope**: If `--models` is provided (skipped when using `--continue` or `--resume`)
-3. **Restored from session**: If using `--continue` or `--resume`
-4. **Saved default**: From `~/.pi/agent/settings.json` (set when you select a model with `/model`)
-5. **First available**: First model with a valid API key
-6. **None**: Allowed in interactive mode (shows error on message submission)
+**Live reload:** The file reloads each time you open `/model`. Edit during session; no restart needed.
 
-### Provider Defaults
+**Model selection priority:**
+1. CLI args (`--provider`, `--model`)
+2. First from `--models` scope (new sessions only)
+3. Restored from session (`--continue`, `--resume`)
+4. Saved default from settings
+5. First available model with valid API key
 
-When multiple providers are available, pi prefers sensible defaults before falling back to "first available":
+> pi can help you create custom provider and model configurations.
 
-| Provider   | Default Model            |
-|------------|--------------------------|
-| anthropic  | claude-sonnet-4-5        |
-| openai     | gpt-5.1-codex            |
-| google     | gemini-2.5-pro           |
-| openrouter | openai/gpt-5.1-codex     |
-| xai        | grok-4-fast-non-reasoning|
-| groq       | openai/gpt-oss-120b      |
-| cerebras   | zai-glm-4.6              |
-| zai        | glm-4.6                  |
+### Themes
 
-### Live Reload & Errors
-
-The models.json file is reloaded every time you open the `/model` selector. This means:
-
-- Edit models.json during a session
-- Or have the agent write/update it for you
-- Use `/model` to see changes immediately
-- No restart needed!
-
-If the file contains errors (JSON syntax, schema violations, missing fields), the selector shows the exact validation error and file path in red so you can fix it immediately.
-
-### Example: Adding Ollama Models
-
-See the configuration structure above. Create `~/.pi/agent/models.json` with your Ollama setup, then use `/model` to select your local models. The agent can also help you write this file if you point it to this README.
-
-## Themes
-
-Pi supports customizable color themes for the TUI. Two built-in themes are available: `dark` (default) and `light`.
-
-### Selecting a Theme
-
-Use the `/theme` command to interactively select a theme, or edit your settings file:
+Built-in themes: `dark` (default), `light`. Auto-detected on first run.
 
 ```bash
-# Interactive selector
-pi
-/theme
-
-# Or edit ~/.pi/agent/settings.json
-{
-  "theme": "dark"  # or "light"
-}
+/theme  # Interactive selector
 ```
 
-On first run, Pi auto-detects your terminal background (dark/light) and selects an appropriate theme.
+**Custom themes:** Create `~/.pi/agent/themes/*.json`. Custom themes support live reload.
 
-### Custom Themes
-
-Create custom themes in `~/.pi/agent/themes/*.json`. Custom themes support **live editing** - when you select a custom theme, Pi watches the file and automatically reloads when you save changes.
-
-**Workflow for creating themes:**
-1. Copy a built-in theme as a starting point:
-   ```bash
-   mkdir -p ~/.pi/agent/themes
-   # Copy dark theme
-   cp $(npm root -g)/@mariozechner/pi-coding-agent/dist/theme/dark.json ~/.pi/agent/themes/my-theme.json
-   # Or copy light theme
-   cp $(npm root -g)/@mariozechner/pi-coding-agent/dist/theme/light.json ~/.pi/agent/themes/my-theme.json
-   ```
-2. Use `/theme` to select "my-theme"
-3. Edit `~/.pi/agent/themes/my-theme.json` - changes apply immediately on save
-4. Iterate until satisfied (no need to re-select the theme)
-
-See [Theme Documentation](docs/theme.md) for:
-- Complete list of 44 color tokens
-- Theme format and examples
-- Color value formats (hex, RGB, terminal default)
-
-Example custom theme:
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/theme-schema.json",
-  "name": "my-theme",
-  "vars": {
-    "accent": "#00aaff",
-    "muted": "#6c6c6c"
-  },
-  "colors": {
-    "accent": "accent",
-    "muted": "muted",
-    ...
-  }
-}
+```bash
+mkdir -p ~/.pi/agent/themes
+cp $(npm root -g)/@mariozechner/pi-coding-agent/dist/theme/dark.json ~/.pi/agent/themes/my-theme.json
 ```
 
-### VS Code Terminal Color Issue
+Select with `/theme`, then edit the file. Changes apply on save.
 
-**Important:** VS Code's integrated terminal has a known issue with rendering truecolor (24-bit RGB) values. By default, it applies a "minimum contrast ratio" adjustment that can make colors look washed out or identical.
+> See [Theme Documentation](docs/theme.md) on how to create custom themes in detail. Pi can help you create a new one.
 
-To fix this, set the contrast ratio to 1 in VS Code settings:
-
-1. Open Settings (Cmd/Ctrl + ,)
-2. Search for: `terminal.integrated.minimumContrastRatio`
-3. Set to: `1`
-
-This ensures VS Code renders the exact RGB colors defined in your theme.
-
-## Slash Commands
-
-The CLI supports several commands to control its behavior:
-
-### /model
-
-Switch models mid-session. Opens an interactive selector where you can type to search (by provider or model name), use arrow keys to navigate, Enter to select, or Escape to cancel.
-
-The selector only displays models for which API keys are configured in your environment (see API Keys section).
-
-### /thinking
-
-Adjust thinking/reasoning level for supported models (Claude Sonnet 4, GPT-5, Gemini 2.5). Opens an interactive selector where you can use arrow keys to navigate, Enter to select, or Escape to cancel.
-
-### /queue
-
-Select message queue mode. Opens an interactive selector where you can choose between:
-- **one-at-a-time** (default): Process queued messages one by one. When you submit messages while the agent is processing, they're queued and sent individually after each agent response completes.
-- **all**: Process all queued messages at once. All queued messages are injected into the context together before the next agent response.
-
-The queue mode setting is saved and persists across sessions.
-
-### /export [filename]
-
-Export the current session to a self-contained HTML file:
-
-```
-/export                          # Auto-generates filename
-/export my-session.html          # Custom filename
-```
-
-The HTML file includes the full conversation with syntax highlighting and is viewable in any browser.
-
-### /session
-
-Show session information and statistics:
-
-```
-/session
-```
-
-Displays:
-- Session file path and ID
-- Message counts (user, assistant, total)
-- Token usage (input, output, cache read/write, total)
-- Total cost (if available)
-
-### /changelog
-
-Display the full changelog with all version history (newest last):
-
-```
-/changelog
-```
-
-### /branch
-
-Create a new conversation branch from a previous message. Opens an interactive selector showing all your user messages in chronological order. Select a message to:
-1. Create a new session with all messages before the selected one
-2. Place the selected message in the editor for modification or resubmission
-
-This allows you to explore alternative conversation paths without losing your current session.
-
-```
-/branch
-```
-
-### /login
-
-Login with OAuth to use subscription-based models (Claude Pro/Max):
-
-```
-/login
-```
-
-Opens an interactive selector to choose provider, then guides you through the OAuth flow in your browser.
-
-### /logout
-
-Logout from OAuth providers:
-
-```
-/logout
-```
-
-Shows a list of logged-in providers to logout from.
-
-### /clear
-
-Clear the conversation context and start a fresh session:
-
-```
-/clear
-```
-
-Aborts any in-flight agent work, clears all messages, and creates a new session file.
-
-### /copy
-
-Copy the last agent message to clipboard:
-
-```
-/copy
-```
-
-Extracts text content from the most recent assistant message and copies it to the system clipboard. Works cross-platform (macOS, Windows, Linux). On Linux, requires `xclip` or `xsel` to be installed.
-
-### /compact
-
-Manually compact the conversation context to reduce token usage:
-
-```
-/compact                           # Use default summary instructions
-/compact Focus on the API changes  # Custom instructions for summary
-```
-
-Creates a summary of the conversation so far, replacing the message history with a condensed version. See [Context Compaction](#context-compaction) for details.
-
-### /autocompact
-
-Toggle automatic context compaction:
-
-```
-/autocompact
-```
-
-When enabled, the agent automatically compacts context when usage exceeds the configured threshold. The current state (enabled/disabled) is shown after toggling. See [Context Compaction](#context-compaction) for details.
+**VS Code terminal fix:** Set `terminal.integrated.minimumContrastRatio` to `1` for accurate colors.
 
 ### Custom Slash Commands
 
-Define reusable prompt templates as Markdown files that appear in the `/` autocomplete.
+Define reusable prompts as Markdown files:
 
 **Locations:**
-- **Global:** `~/.pi/agent/commands/*.md` - available in all sessions
-- **Project:** `.pi/commands/*.md` - project-specific commands
+- Global: `~/.pi/agent/commands/*.md`
+- Project: `.pi/commands/*.md`
 
-**File format:**
+**Format:**
 
 ```markdown
 ---
@@ -551,685 +468,400 @@ Review the staged changes (`git diff --cached`). Focus on:
 - Bugs and logic errors
 - Security issues
 - Error handling gaps
-- Code style per AGENTS.md
 ```
 
-The filename (without `.md`) becomes the command name. The optional `description` frontmatter field is shown in autocomplete. If omitted, the first line of content is used.
+Filename (without `.md`) becomes the command name. Description shown in autocomplete.
 
-**Arguments (bash-style):**
-
-Commands support positional arguments with quote-aware parsing:
+**Arguments:**
 
 ```markdown
 ---
-description: Create a component with features
+description: Create a component
 ---
-Create a React component named $1 with these features: $@
+Create a React component named $1 with features: $@
 ```
 
-Usage: `/component Button "has onClick handler" "supports disabled"`
+Usage: `/component Button "onClick handler" "disabled support"`
 - `$1` = `Button`
-- `$2` = `has onClick handler`
-- `$@` = `Button has onClick handler supports disabled`
+- `$@` = all arguments joined
 
-**Namespacing:**
+**Namespacing:** Subdirectories create prefixes. `.pi/commands/frontend/component.md` → `/component (project:frontend)`
 
-Subdirectories create namespaced commands. A file at `.pi/commands/frontend/component.md` creates `/component` with description showing `(project:frontend)`.
 
-**Source indicators:**
+### Skills
 
-Commands show their source in autocomplete:
-- `(user)` - from `~/.pi/agent/commands/`
-- `(project)` - from `.pi/commands/`
-- `(project:subdir)` - from `.pi/commands/subdir/`
+Skills are self-contained capability packages that the agent loads on-demand. Pi implements the [Agent Skills standard](https://agentskills.io/specification), warning about violations but remaining lenient.
 
-**CLI usage:**
+A skill provides specialized workflows, setup instructions, helper scripts, and reference documentation for specific tasks. Skills are loaded when the agent decides a task matches the description, or when you explicitly ask to use one.
 
-Custom slash commands also work from the command line:
+**Example use cases:**
+- Web search and content extraction (Brave Search API)
+- Browser automation via Chrome DevTools Protocol
+- Google Calendar, Gmail, Drive integration
+- PDF/DOCX processing and creation
+- Speech-to-text transcription
+- YouTube transcript extraction
 
-```bash
-# Non-interactive mode
-pi -p "/review"
+**Skill locations:**
+- Pi user: `~/.pi/agent/skills/**/SKILL.md` (recursive)
+- Pi project: `.pi/skills/**/SKILL.md` (recursive)
+- Claude Code: `~/.claude/skills/*/SKILL.md` and `.claude/skills/*/SKILL.md`
+- Codex CLI: `~/.codex/skills/**/SKILL.md` (recursive)
 
-# With arguments
-pi -p '/component Button "handles click events"'
-
-# Interactive mode with initial command
-pi "/review"
-```
-
-## Editor Features
-
-The interactive input editor includes several productivity features:
-
-### File Reference (`@`)
-
-Type **`@`** to fuzzy-search for files and folders in your project:
-- `@editor` → finds files/folders with "editor" in the name
-- `@readme` → finds README files anywhere in the project
-- `@src` → finds folders like `src/`, `resources/`, etc.
-- Directories are prioritized and shown with trailing `/`
-- Autocomplete triggers immediately when you type `@`
-- Use **Up/Down arrows** to navigate, **Tab**/**Enter** to select
-
-Respects `.gitignore` files and skips hidden files/directories.
-
-### Path Completion
-
-Press **Tab** to autocomplete file and directory paths:
-- Works with relative paths: `./src/` + Tab → complete files in src/
-- Works with parent directories: `../../` + Tab → navigate up and complete
-- Works with home directory: `~/Des` + Tab → `~/Desktop/`
-- Use **Up/Down arrows** to navigate completion suggestions
-- Press **Enter** to select a completion
-- Shows matching files and directories as you type
-
-### File Drag & Drop
-
-Drag files from your OS file explorer (Finder on macOS, Explorer on Windows) directly onto the terminal. The file path will be automatically inserted into the editor. Works great with screenshots from macOS screenshot tool.
-
-### Multi-line Paste
-
-Paste multiple lines of text (e.g., code snippets, logs) and they'll be automatically coalesced into a compact `[paste #123 <N> lines]` reference in the editor. The full content is still sent to the model.
-
-### Message Queuing
-
-You can submit multiple messages while the agent is processing without waiting for responses. Messages are queued and processed based on your queue mode setting:
-
-**One-at-a-time mode (default):**
-- Each queued message is processed sequentially with its own response
-- Example: Queue "task 1", "task 2", "task 3" → agent completes task 1 → processes task 2 → completes task 2 → processes task 3
-- Recommended for most use cases
-
-**All mode:**
-- All queued messages are sent to the model at once in a single context
-- Example: Queue "task 1", "task 2", "task 3" → agent receives all three together → responds considering all tasks
-- Useful when tasks should be considered together
-
-**Visual feedback:**
-- Queued messages appear below the chat with "Queued: <message text>"
-- Messages disappear from the queue as they're processed
-
-**Abort and restore:**
-- Press **Escape** while streaming to abort the current operation
-- All queued messages (plus any text in the editor) are restored to the editor
-- Allows you to modify or remove queued messages before resubmitting
-
-Change queue mode with `/queue` command. Setting is saved in `~/.pi/agent/settings.json`.
-
-### Keyboard Shortcuts
-
-**Navigation:**
-- **Arrow keys**: Move cursor (Up/Down navigate visual lines, Left/Right move by character)
-- **Option+Left** / **Ctrl+Left**: Move word backwards
-- **Option+Right** / **Ctrl+Right**: Move word forwards
-- **Ctrl+A** / **Home**: Jump to start of line
-- **Ctrl+E** / **End**: Jump to end of line
-
-**Editing:**
-- **Enter**: Send message
-- **Shift+Enter** / **Alt+Enter**: Insert new line (multi-line input). On WSL, use **Ctrl+Enter** instead.
-- **Backspace**: Delete character backwards
-- **Delete** (or **Fn+Backspace**): Delete character forwards
-- **Ctrl+W** / **Option+Backspace**: Delete word backwards (stops at whitespace or punctuation)
-- **Ctrl+U**: Delete to start of line (at line start: merge with previous line)
-- **Ctrl+K**: Delete to end of line (at line end: merge with next line)
-
-**Completion:**
-- **Tab**: Path completion / Apply autocomplete selection
-- **Escape**: Cancel autocomplete (when autocomplete is active)
-
-**Other:**
-- **Ctrl+C**: Clear editor (first press) / Exit pi (second press)
-- **Shift+Tab**: Cycle thinking level (for reasoning-capable models)
-- **Ctrl+P**: Cycle models (use `--models` to scope)
-- **Ctrl+O**: Toggle tool output expansion (collapsed ↔ full output)
-
-## Project Context Files
-
-The agent automatically loads context from `AGENTS.md` or `CLAUDE.md` files at startup. These files are loaded in hierarchical order to support both global preferences and monorepo structures.
-
-### File Locations
-
-Context files are loaded in this order:
-
-1. **Global context**: `~/.pi/agent/AGENTS.md` or `CLAUDE.md`
-   - Applies to all your coding sessions
-   - Great for personal coding preferences and workflows
-
-2. **Parent directories** (top-most first down to current directory)
-   - Walks up from current directory to filesystem root
-   - Each directory can have its own `AGENTS.md` or `CLAUDE.md`
-   - Perfect for monorepos with shared context at higher levels
-
-3. **Current directory**: Your project's `AGENTS.md` or `CLAUDE.md`
-   - Most specific context, loaded last
-   - Overwrites or extends parent/global context
-
-**File preference**: In each directory, `AGENTS.md` is preferred over `CLAUDE.md` if both exist.
-
-### What to Include
-
-Context files are useful for:
-- Project-specific instructions and guidelines
-- Common bash commands and workflows
-- Architecture documentation
-- Coding conventions and style guides
-- Dependencies and setup information
-- Testing instructions
-- Repository etiquette (branch naming, merge vs. rebase, etc.)
-
-### Example
+**Format:**
 
 ```markdown
-# Common Commands
-- npm run build: Build the project
-- npm test: Run tests
+---
+name: brave-search
+description: Web search via Brave Search API. Use for documentation, facts, or web content.
+---
 
-# Code Style
-- Use TypeScript strict mode
-- Prefer async/await over promises
+# Brave Search
 
-# Workflow
-- Always run tests before committing
-- Update CHANGELOG.md for user-facing changes
+## Setup
+\`\`\`bash
+cd /path/to/brave-search && npm install
+\`\`\`
+
+## Usage
+\`\`\`bash
+./search.js "query"           # Basic search
+./search.js "query" --content # Include page content
+\`\`\`
 ```
 
-All context files are automatically included in the system prompt at session start, along with the current date/time and working directory. This ensures the AI has complete project context from the very first message.
+- `name`: Required. Must match parent directory name. Lowercase, hyphens, max 64 chars.
+- `description`: Required. Max 1024 chars. Determines when the skill is loaded.
 
-## Image Support
+**Disable skills:** `pi --no-skills` or set `skills.enabled: false` in settings.
 
-Send images to vision-capable models by providing file paths:
+> See [docs/skills.md](docs/skills.md) for details, examples, and links to skill repositories. pi can help you create new skills.
 
-```
-You: What is in this screenshot? /path/to/image.png
-```
+### Hooks
 
-Supported formats: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`
+Hooks are TypeScript modules that extend pi's behavior by subscribing to lifecycle events. Use them to:
 
-The image will be automatically encoded and sent with your message. JPEG and PNG are supported across all vision models. Other formats may only be supported by some models.
+- **Block dangerous commands** (permission gates for `rm -rf`, `sudo`, etc.)
+- **Checkpoint code state** (git stash at each turn, restore on `/branch`)
+- **Protect paths** (block writes to `.env`, `node_modules/`, etc.)
+- **Modify tool output** (filter or transform results before the LLM sees them)
+- **Inject messages from external sources to wake up the agent** (file watchers, webhooks, CI systems)
 
-## Session Management
+**Hook locations:**
+- Global: `~/.pi/agent/hooks/*.ts`
+- Project: `.pi/hooks/*.ts`
+- CLI: `--hook <path>` (for debugging)
 
-Sessions are automatically saved in `~/.pi/agent/sessions/` organized by working directory. Each session is stored as a JSONL file with a unique timestamp-based ID.
+**Quick example** (permission gate):
 
-To continue the most recent session:
+```typescript
+import type { HookAPI } from "@mariozechner/pi-coding-agent/hooks";
 
-```bash
-pi --continue
-# or
-pi -c
-```
-
-To browse and select from past sessions:
-
-```bash
-pi --resume
-# or
-pi -r
-```
-
-This opens an interactive session selector where you can:
-- Type to search through session messages
-- Use arrow keys to navigate the list
-- Press Enter to resume a session
-- Press Escape to cancel
-
-Sessions include all conversation messages, tool calls and results, model switches, and thinking level changes.
-
-To run without saving a session (ephemeral mode):
-
-```bash
-pi --no-session
+export default function (pi: HookAPI) {
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "bash" && /sudo/.test(event.input.command as string)) {
+      const ok = await ctx.ui.confirm("Allow sudo?", event.input.command as string);
+      if (!ok) return { block: true, reason: "Blocked by user" };
+    }
+    return undefined;
+  });
+}
 ```
 
-To use a specific session file instead of auto-generating one:
+**Sending messages from hooks:**
 
-```bash
-pi --session /path/to/my-session.jsonl
+Use `pi.send(text, attachments?)` to inject messages into the session. If the agent is streaming, the message is queued; otherwise a new agent loop starts immediately.
+
+```typescript
+import * as fs from "node:fs";
+import type { HookAPI } from "@mariozechner/pi-coding-agent/hooks";
+
+export default function (pi: HookAPI) {
+  pi.on("session", async (event) => {
+    if (event.reason !== "start") return;
+    fs.watch("/tmp/trigger.txt", () => {
+      const content = fs.readFileSync("/tmp/trigger.txt", "utf-8").trim();
+      if (content) pi.send(content);
+    });
+  });
+}
 ```
 
-## Context Compaction
+> See [Hooks Documentation](docs/hooks.md) for full API reference. pi can help you create new hooks
 
-> **Note:** Compaction is lossy and should generally be avoided. The agent loses access to the full conversation after compaction. Size your tasks to avoid hitting context limits. Alternatively, when context usage approaches 85-90%, ask the agent to write a summary to a markdown file, iterate until it captures everything important, then start a new session with that file.
->
-> That said, compaction does not destroy history. The full session is preserved in the session file with compaction events as markers. You can branch (`/branch`) from any previous message, and branched sessions include the complete history. If compaction missed something, you can ask the agent to read the session file directly.
+> See [examples/hooks/](examples/hooks/) for working examples including permission gates, git checkpointing, and path protection.
 
-Long sessions can exhaust the model's context window. Context compaction summarizes older conversation history while preserving recent messages, allowing sessions to continue indefinitely.
+### Custom Tools
 
-### How It Works
+Custom tools let you extend the built-in toolset (read, write, edit, bash, ...) and are called by the LLM directly. They are TypeScript modules that define tools with optional custom TUI integration for getting user input and custom tool call and result rendering.
 
-When compaction runs (manually via `/compact` or automatically):
+**Tool locations:**
+- Global: `~/.pi/agent/tools/*.ts`
+- Project: `.pi/tools/*.ts`
+- CLI: `--tool <path>`
+- Settings: `customTools` array in `settings.json`
 
-1. A **cut point** is calculated to keep approximately `keepRecentTokens` (default: 20k) worth of recent messages
-2. Messages **before** the cut point are sent to the model for summarization
-3. Messages **after** the cut point are kept verbatim
-4. The summary replaces the older messages as a "context handoff" message
-5. If there was a previous compaction, its summary is included as context for the new summary (chaining)
+**Quick example:**
 
-Cut points are always placed at user message boundaries to preserve turn integrity.
+```typescript
+import { Type } from "@sinclair/typebox";
+import type { CustomToolFactory } from "@mariozechner/pi-coding-agent";
 
-The summary is displayed in the TUI as a collapsible block (toggle with `o` key). HTML exports also show compaction summaries as collapsible sections.
+const factory: CustomToolFactory = (pi) => ({
+  name: "greet",
+  label: "Greeting",
+  description: "Generate a greeting",
+  parameters: Type.Object({
+    name: Type.String({ description: "Name to greet" }),
+  }),
 
-### Manual Compaction
+  async execute(toolCallId, params) {
+    return {
+      content: [{ type: "text", text: `Hello, ${params.name}!` }],
+      details: { greeted: params.name },
+    };
+  },
+});
 
-Use `/compact` to manually trigger compaction at any time:
-
+export default factory;
 ```
-/compact                           # Default summary
-/compact Focus on the API changes  # Custom instructions guide what to emphasize
-```
 
-Custom instructions are appended to the default summary prompt, letting you focus the summary on specific aspects of the conversation.
+**Features:**
+- Access to `pi.cwd`, `pi.exec()`, `pi.ui` (select/confirm/input dialogs)
+- Session lifecycle via `onSession` callback (for state reconstruction)
+- Custom rendering via `renderCall()` and `renderResult()` methods
+- Streaming results via `onUpdate` callback
+- Abort handling via `signal` parameter
+- Multiple tools from one factory (return an array)
 
-### Automatic Compaction
+> See [Custom Tools Documentation](docs/custom-tools.md) for the full API reference, TUI component guide, and examples. pi can help you create custom tools.
 
-Enable auto-compaction with `/autocompact`. When enabled, compaction triggers automatically when context usage exceeds `contextWindow - reserveTokens`.
+> See [examples/custom-tools/](examples/custom-tools/) for working examples including a todo list with session state management and a question tool with UI interaction.
 
-The context percentage is shown in the footer. When it approaches 100%, auto-compaction kicks in (if enabled) or you should manually compact.
+### Settings File
 
-### Configuration
-
-Power users can tune compaction behavior in `~/.pi/agent/settings.json`:
+`~/.pi/agent/settings.json` stores persistent preferences:
 
 ```json
 {
+  "theme": "dark",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-sonnet-4-20250514",
+  "defaultThinkingLevel": "medium",
+  "queueMode": "one-at-a-time",
+  "shellPath": "C:\\path\\to\\bash.exe",
+  "hideThinkingBlock": false,
+  "collapseChangelog": false,
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
     "keepRecentTokens": 20000
-  }
+  },
+  "skills": {
+    "enabled": true
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000
+  },
+  "terminal": {
+    "showImages": true
+  },
+  "hooks": ["/path/to/hook.ts"],
+  "hookTimeout": 30000,
+  "customTools": ["/path/to/tool.ts"]
 }
 ```
 
-- **enabled**: Whether auto-compaction is active (toggle with `/autocompact`)
-- **reserveTokens**: Token buffer to keep free (default: 16,384). Auto-compaction triggers when `contextTokens > contextWindow - reserveTokens`
-- **keepRecentTokens**: How many tokens worth of recent messages to preserve verbatim (default: 20,000). Older messages are summarized.
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `theme` | Color theme name | auto-detected |
+| `defaultProvider` | Default model provider | - |
+| `defaultModel` | Default model ID | - |
+| `defaultThinkingLevel` | Thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | - |
+| `queueMode` | Message queue mode: `all` or `one-at-a-time` | `one-at-a-time` |
+| `shellPath` | Custom bash path (Windows) | auto-detected |
+| `hideThinkingBlock` | Hide thinking blocks in output (Ctrl+T to toggle) | `false` |
+| `collapseChangelog` | Show condensed changelog after update | `false` |
+| `compaction.enabled` | Enable auto-compaction | `true` |
+| `compaction.reserveTokens` | Tokens to reserve before compaction triggers | `16384` |
+| `compaction.keepRecentTokens` | Recent tokens to keep after compaction | `20000` |
+| `skills.enabled` | Enable skills discovery | `true` |
+| `retry.enabled` | Auto-retry on transient errors | `true` |
+| `retry.maxRetries` | Maximum retry attempts | `3` |
+| `retry.baseDelayMs` | Base delay for exponential backoff | `2000` |
+| `terminal.showImages` | Render images inline (supported terminals) | `true` |
+| `hooks` | Additional hook file paths | `[]` |
+| `hookTimeout` | Timeout for hook operations (ms) | `30000` |
+| `customTools` | Additional custom tool file paths | `[]` |
 
-### Supported Modes
+---
 
-Context compaction works in both interactive and RPC modes:
-
-- **Interactive**: Use `/compact` and `/autocompact` commands
-- **RPC**: Send `{"type":"compact"}` for manual compaction. Auto-compaction emits `{"type":"compaction","auto":true}` events. See [RPC documentation](docs/rpc.md) for details.
-
-## CLI Options
+## CLI Reference
 
 ```bash
 pi [options] [@files...] [messages...]
 ```
 
-### File Arguments (`@file`)
-
-You can include files directly in your initial message using the `@` prefix:
-
-```bash
-# Include a text file in your prompt
-pi @prompt.md "Answer the question"
-
-# Include multiple files
-pi @requirements.md @context.txt "Summarize these"
-
-# Include images (vision-capable models only)
-pi @screenshot.png "What's in this image?"
-
-# Mix text and images
-pi @prompt.md @diagram.png "Explain based on the diagram"
-
-# Files without additional text
-pi @task.md
-```
-
-**How it works:**
-- All `@file` arguments are combined into the first user message
-- Text files are wrapped in `<file name="path">content</file>` tags
-- Images (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`) are attached as base64-encoded attachments
-- Paths support `~` for home directory and relative/absolute paths
-- Empty files are skipped
-- Non-existent files cause an immediate error
-
-**Examples:**
-```bash
-# All files go into first message, regardless of position
-pi @file1.md @file2.txt "prompt" @file3.md
-
-# This sends:
-# Message 1: file1 + file2 + file3 + "prompt"
-# (Any additional plain text arguments become separate messages)
-
-# Home directory expansion works
-pi @~/Documents/notes.md "Summarize"
-
-# Combine with other options
-pi --print @requirements.md "List the main points"
-```
-
-**Limitations:**
-- Not supported in `--mode rpc` (will error)
-- Images require vision-capable models (e.g., Claude, GPT-4o, Gemini)
-
 ### Options
 
-**--provider <name>**
-Provider name. Available: `anthropic`, `openai`, `google`, `xai`, `groq`, `cerebras`, `openrouter`, `zai`, plus any custom providers defined in `~/.pi/agent/models.json`.
+| Option | Description |
+|--------|-------------|
+| `--provider <name>` | Provider: `anthropic`, `openai`, `google`, `mistral`, `xai`, `groq`, `cerebras`, `openrouter`, `zai`, or custom |
+| `--model <id>` | Model ID |
+| `--api-key <key>` | API key (overrides environment) |
+| `--system-prompt <text\|file>` | Custom system prompt (text or file path) |
+| `--append-system-prompt <text\|file>` | Append to system prompt |
+| `--mode <mode>` | Output mode: `text`, `json`, `rpc` (implies `--print`) |
+| `--print`, `-p` | Non-interactive: process prompt and exit |
+| `--no-session` | Don't save session |
+| `--session <path>` | Use specific session file |
+| `--continue`, `-c` | Continue most recent session |
+| `--resume`, `-r` | Select session to resume |
+| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling (e.g., `sonnet:high,haiku:low`) |
+| `--tools <tools>` | Comma-separated tool list (default: `read,bash,edit,write`) |
+| `--thinking <level>` | Thinking level: `off`, `minimal`, `low`, `medium`, `high` |
+| `--hook <path>` | Load a hook file (can be used multiple times) |
+| `--no-skills` | Disable skills discovery and loading |
+| `--export <file> [output]` | Export session to HTML |
+| `--help`, `-h` | Show help |
+| `--version`, `-v` | Show version |
 
-**--model <id>**
-Model ID. If not specified, uses: (1) saved default from settings, (2) first available model with valid API key, or (3) none (interactive mode only).
+### File Arguments
 
-**--api-key <key>**
-API key (overrides environment variables)
+Include files with `@` prefix:
 
-**--system-prompt <text|file>**
-Custom system prompt. Can be:
-- Inline text: `--system-prompt "You are a helpful assistant"`
-- File path: `--system-prompt ./my-prompt.txt`
+```bash
+pi @prompt.md "Answer this"
+pi @screenshot.png "What's in this image?"
+pi @requirements.md @design.png "Implement this"
+```
 
-If the argument is a valid file path, the file contents will be used as the system prompt. Otherwise, the text is used directly. Project context files and datetime are automatically appended.
-
-**--mode <mode>**
-Output mode for non-interactive usage (implies `--print`). Options:
-- `text` (default): Output only the final assistant message text
-- `json`: Stream all agent events as JSON (one event per line). Events are emitted by `@mariozechner/pi-agent` and include message updates, tool executions, and completions
-- `rpc`: JSON mode plus stdin listener for headless operation. Send JSON commands on stdin: `{"type":"prompt","message":"..."}` or `{"type":"abort"}`. See [test/rpc-example.ts](test/rpc-example.ts) for a complete example
-
-**--print, -p**
-Non-interactive mode: process the prompt(s) and exit. Without this flag, passing a prompt starts interactive mode with the prompt pre-submitted. Similar to Claude's `-p` flag and Codex's `exec` command.
-
-**--no-session**
-Don't save session (ephemeral mode)
-
-**--session <path>**
-Use specific session file path instead of auto-generating one
-
-**--continue, -c**
-Continue the most recent session
-
-**--resume, -r**
-Select a session to resume (opens interactive selector)
-
-**--models <patterns>**
-Comma-separated model patterns for quick cycling with `Ctrl+P`. Matching priority:
-1. `provider/modelId` exact match (e.g., `openrouter/openai/gpt-5.1-codex`)
-2. Exact model ID match (e.g., `gpt-5.1-codex`)
-3. Partial match against model IDs and names (case-insensitive)
-
-When multiple partial matches exist, prefers aliases over dated versions (e.g., `claude-sonnet-4-5` over `claude-sonnet-4-5-20250929`). Without this flag, `Ctrl+P` cycles through all available models.
-
-Each pattern can optionally include a thinking level suffix: `pattern:level` where level is one of `off`, `minimal`, `low`, `medium`, or `high`. When cycling models, the associated thinking level is automatically applied. The first model in the list is used as the initial model when starting a new session.
-
-Examples:
-- `--models openrouter/openai/gpt-5.1-codex` - Exact provider/model match
-- `--models gpt-5.1-codex` - Exact ID match (not `openai/gpt-5.1-codex-mini`)
-- `--models sonnet:high,haiku:low` - Sonnet with high thinking, Haiku with low thinking
-- `--models sonnet,haiku` - Partial match for any model containing "sonnet" or "haiku"
-
-**--tools <tools>**
-Comma-separated list of tools to enable. By default, pi uses `read,bash,edit,write`. This flag allows restricting or changing the available tools.
-
-Available tools:
-- `read` - Read file contents
-- `bash` - Execute bash commands
-- `edit` - Make surgical edits to files
-- `write` - Create or overwrite files
-- `grep` - Search file contents for patterns (read-only, off by default)
-- `find` - Find files by glob pattern (read-only, off by default)
-- `ls` - List directory contents (read-only, off by default)
-
-Examples:
-- `--tools read,grep,find,ls` - Read-only mode for code review/exploration
-- `--tools read,bash` - Only allow reading and bash commands
-
-**--thinking <level>**
-Set thinking level for reasoning-capable models. Valid values: `off`, `minimal`, `low`, `medium`, `high`. Takes highest priority over all other thinking level sources (saved settings, `--models` pattern levels, session restore).
-
-Examples:
-- `--thinking high` - Start with high thinking level
-- `--thinking off` - Disable thinking even if saved setting was different
-
-**--export <file>**
-Export a session file to a self-contained HTML file and exit. Auto-detects format (session manager format or streaming event format). Optionally provide an output filename as the second argument.
-
-**Note:** When exporting streaming event logs (e.g., `pi-output.jsonl` from `--mode json`), the system prompt and tool definitions are not available since they are not recorded in the event stream. The exported HTML will include a notice about this.
-
-Examples:
-- `--export session.jsonl` - Export to `pi-session-session.html`
-- `--export session.jsonl output.html` - Export to custom filename
-
-**--help, -h**
-Show help message
+Text files wrapped in `<file name="path">content</file>`. Images attached as base64.
 
 ### Examples
 
 ```bash
-# Start interactive mode
+# Interactive mode
 pi
 
-# Interactive mode with initial prompt (stays running after completion)
+# Interactive with initial prompt
 pi "List all .ts files in src/"
 
-# Include files in your prompt
-pi @requirements.md @design.png "Implement this feature"
-
-# Non-interactive mode (process prompt and exit)
+# Non-interactive
 pi -p "List all .ts files in src/"
 
-# Non-interactive with files
-pi -p @code.ts "Review this code for bugs"
+# With files
+pi -p @code.ts "Review this code"
 
-# JSON mode - stream all agent events (non-interactive)
-pi --mode json "List all .ts files in src/"
+# JSON event stream
+pi --mode json "List files"
 
-# RPC mode - headless operation (see test/rpc-example.ts)
+# RPC mode (headless)
 pi --mode rpc --no-session
-# Then send JSON on stdin:
-# {"type":"prompt","message":"List all .ts files"}
-# {"type":"abort"}
 
-# Continue previous session
+# Continue session
 pi -c "What did we discuss?"
 
-# Use different model
-pi --provider openai --model gpt-4o "Help me refactor this code"
-
-# Limit model cycling to specific models
-pi --models claude-sonnet,claude-haiku,gpt-4o
-# Now Ctrl+P cycles only through those models
+# Specific model
+pi --provider openai --model gpt-4o "Help me refactor"
 
 # Model cycling with thinking levels
 pi --models sonnet:high,haiku:low
-# Starts with sonnet at high thinking, Ctrl+P switches to haiku at low thinking
 
-# Start with specific thinking level
-pi --thinking high "Solve this complex algorithm problem"
+# Read-only mode
+pi --tools read,grep,find,ls -p "Review the architecture"
 
-# Read-only mode (no file modifications possible)
-pi --tools read,grep,find,ls -p "Review the architecture in src/"
-
-# Oracle-style subagent (bash for git/gh, no file modifications)
-pi --tools read,bash,grep,find,ls \
-   --no-session \
-   -p "Use bash only for read-only operations. Read issue #74 with gh, then review the implementation"
-
-# Export a session file to HTML
-pi --export ~/.pi/agent/sessions/--myproject--/session.jsonl
-pi --export session.jsonl my-export.html
+# Export session
+pi --export session.jsonl output.html
 ```
+
+---
 
 ## Tools
 
 ### Default Tools
 
-By default, the agent has access to four core tools:
+| Tool | Description |
+|------|-------------|
+| `read` | Read file contents. Images sent as attachments. Text: first 2000 lines, lines truncated at 2000 chars. Use offset/limit for large files. |
+| `write` | Write/overwrite file. Creates parent directories. |
+| `edit` | Replace exact text in file. Must match exactly including whitespace. Fails if text appears multiple times or not found. |
+| `bash` | Execute command. Returns stdout/stderr. Optional `timeout` parameter. |
 
-**read**
-Read file contents. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, defaults to first 2000 lines. Use offset/limit parameters for large files. Lines longer than 2000 characters are truncated.
+### Read-Only Tools
 
-**write**
-Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.
+Available via `--tools` flag:
 
-**edit**
-Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits. Returns an error if the text appears multiple times or isn't found.
+| Tool | Description |
+|------|-------------|
+| `grep` | Search file contents (regex or literal). Respects `.gitignore`. |
+| `find` | Search for files by glob pattern. Respects `.gitignore`. |
+| `ls` | List directory contents. Includes dotfiles. |
 
-**bash**
-Execute a bash command in the current working directory. Returns stdout and stderr. Optionally accepts a `timeout` parameter (in seconds) - no default timeout.
+Example: `--tools read,grep,find,ls` for code review without modification.
 
-### Read-Only Exploration Tools
+For adding new tools, see [Custom Tools](#custom-tools) in the Configuration section.
 
-These tools are available via `--tools` flag for read-only code exploration:
+---
 
-**grep**
-Search file contents for a pattern (regex or literal). Returns matching lines with file paths and line numbers. Respects `.gitignore`. Parameters: `pattern` (required), `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit`.
+## Programmatic Usage
 
-**find**
-Search for files by glob pattern (e.g., `**/*.ts`). Returns matching file paths relative to the search directory. Respects `.gitignore`. Parameters: `pattern` (required), `path`, `limit`.
+### RPC Mode
 
-**ls**
-List directory contents. Returns entries sorted alphabetically with `/` suffix for directories. Includes dotfiles. Parameters: `path`, `limit`.
+For embedding pi in other applications:
 
-### MCP & Adding Your Own Tools
-
-**pi does and will not support MCP.** Instead, it relies on the four built-in tools above and assumes the agent can invoke pre-existing CLI tools or write them on the fly as needed.
-
-**Here's the gist:**
-
-1. Create a simple CLI tool (any language, any executable)
-2. Write a concise README.md describing what it does and how to use it
-3. Tell the agent to read that README
-
-**Minimal example:**
-
-`~/agent-tools/screenshot/README.md`:
-```markdown
-# Screenshot Tool
-
-Takes a screenshot of your main display.
-
-## Usage
 ```bash
-screenshot.sh
+pi --mode rpc --no-session
 ```
 
-Returns the path to the saved PNG file.
+Send JSON commands on stdin:
+```json
+{"type":"prompt","message":"List all .ts files"}
+{"type":"abort"}
 ```
 
-`~/agent-tools/screenshot/screenshot.sh`:
+See [RPC documentation](docs/rpc.md) for full protocol.
+
+**Node.js/TypeScript:** Consider using `AgentSession` directly from `@mariozechner/pi-coding-agent` instead of subprocess. See [`src/core/agent-session.ts`](src/core/agent-session.ts) and [`src/modes/rpc/rpc-client.ts`](src/modes/rpc/rpc-client.ts).
+
+### HTML Export
+
 ```bash
-#!/bin/bash
-screencapture -x /tmp/screenshot-$(date +%s).png
-ls -t /tmp/screenshot-*.png | head -1
+pi --export session.jsonl              # Auto-generated filename
+pi --export session.jsonl output.html  # Custom filename
 ```
 
-**In your session:**
-```
-You: Read ~/agent-tools/screenshot/README.md and use that tool to take a screenshot
-```
+Works with both session files and streaming event logs from `--mode json`.
 
-The agent will read the README, understand the tool, and invoke it via bash as needed. If you need a new tool, ask the agent to write it for you.
+---
 
-You can also reference tool READMEs in your `AGENTS.md` files to make them automatically available:
-- Global: `~/.pi/agent/AGENTS.md` - available in all sessions
-- Project-specific: `./AGENTS.md` - available in this project
+## Philosophy
 
-**Real-world example:**
+Pi is opinionated about what it won't do. These are intentional design decisions to minimize context bloat and avoid anti-patterns.
 
-The [exa-search](https://github.com/badlogic/exa-search) tools provide web search capabilities via the Exa API. Built by the agent itself in ~2 minutes. Far from perfect, but functional. Just tell your agent: "Read ~/agent-tools/exa-search/README.md and search for X".
+**No MCP.** Build CLI tools with READMEs (see [Skills](#skills)). The agent reads them on demand. [Would you like to know more?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-For a detailed walkthrough with more examples, and the reasons for and benefits of this decision, see: https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/
+**No sub-agents.** Spawn pi instances via tmux, or [build your own sub-agent tool](examples/custom-tools/subagent/) with [custom tools](#custom-tools). Full observability and steerability.
 
-## Security (YOLO by default)
+**No permission popups.** Security theater. Run in a container or build your own with [Hooks](#hooks).
 
-This agent runs in full YOLO mode and assumes you know what you're doing. It has unrestricted access to your filesystem and can execute any command without permission checks or safety rails.
+**No plan mode.** Gather context in one session, write plans to file, start fresh for implementation.
 
-**What this means:**
-- No permission prompts for file operations or commands
-- No pre-checking of bash commands for malicious content
-- Full filesystem access - can read, write, or delete anything
-- Can execute any command with your user privileges
+**No built-in to-dos.** They confuse models. Use a TODO.md file, or [build your own](examples/custom-tools/todo.ts) with [custom tools](#custom-tools).
 
-**Why:**
-- Permission systems add massive friction while being easily circumvented
-- Pre-checking tools for "dangerous" patterns introduces latency, false positives, and is ineffective
+**No background bash.** Use tmux. Full observability, direct interaction.
 
-**Prompt injection risks:**
-- By default, pi has no web search or fetch tool
-- However, it can use `curl` or read files from disk
-- Both provide ample surface area for prompt injection attacks
-- Malicious content in files or command outputs can influence behavior
+Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the full rationale.
 
-**Mitigations:**
-- Run pi inside a container if you're uncomfortable with full access
-- Use a different tool if you need guardrails
-- Don't use pi on systems with sensitive data you can't afford to lose
-- Fork pi and add all of the above
-
-This is how I want it to work and I'm not likely to change my stance on this.
-
-Use at your own risk.
-
-## Sub-Agents
-
-**pi does not and will not support sub-agents as a built-in feature.** If the agent needs to delegate work, it can:
-
-1. Spawn another instance of itself via the `pi` CLI command
-2. Write a custom tool with a README.md that describes how to invoke pi for specific tasks
-
-**Why no built-in sub-agents:**
-
-Context transfer between agents is generally poor. Information gets lost, compressed, or misrepresented when passed through agent boundaries. Direct execution with full context is more effective than delegation with summarized context.
-
-If you need parallel work on independent tasks, manually run multiple `pi` sessions in different terminal tabs. You're the orchestrator.
-
-## To-Dos
-
-**pi does not and will not support built-in to-dos.** In my experience, to-do lists generally confuse models more than they help.
-
-If you need task tracking, make it stateful by writing to a file:
-
-```markdown
-# TODO.md
-
-- [x] Implement user authentication
-- [x] Add database migrations
-- [ ] Write API documentation
-- [ ] Add rate limiting
-```
-
-The agent can read and update this file as needed. Using checkboxes keeps track of what's done and what remains. Simple, visible, and under your control.
-
-## Planning
-
-**pi does not and will not have a built-in planning mode.** Telling the agent to think through a problem together with you, without modifying files or executing commands, is generally sufficient.
-
-If you need persistent planning across sessions, write it to a file:
-
-```markdown
-# PLAN.md
-
-## Goal
-Refactor authentication system to support OAuth
-
-## Approach
-1. Research OAuth 2.0 flows
-2. Design token storage schema
-3. Implement authorization server endpoints
-4. Update client-side login flow
-5. Add tests
-
-## Current Step
-Working on step 3 - authorization endpoints
-```
-
-The agent can read, update, and reference the plan as it works. Unlike ephemeral planning modes that only exist within a session, file-based plans persist and can be versioned with your code.
-
-## Background Bash
-
-**pi does not and will not implement background bash execution.** Instead, tell the agent to use `tmux` or something like [tterminal-cp](https://mariozechner.at/posts/2025-08-15-mcp-vs-cli/). Bonus points: you can watch the agent interact with a CLI like a debugger and even intervene if necessary.
+---
 
 ## Development
 
 ### Forking / Rebranding
 
-All branding (app name, config directory) is configurable via `package.json`:
+Configure via `package.json`:
 
 ```json
 {
@@ -1240,44 +872,27 @@ All branding (app name, config directory) is configurable via `package.json`:
 }
 ```
 
-To create a fork with different branding:
-1. Change `piConfig.name` to your app name (e.g., `"tau"`)
-2. Change `piConfig.configDir` to your config directory (e.g., `".tau"`)
-3. Change the `bin` field to your command name: `"bin": { "tau": "dist/cli.js" }`
-
-This affects:
-- CLI banner and help text
-- Config directory (`~/.pi/agent/` → `~/.tau/agent/`)
-- Environment variable name (`PI_CODING_AGENT_DIR` → `TAU_CODING_AGENT_DIR`)
-- All user-facing paths in error messages and documentation
+Change `name`, `configDir`, and `bin` field for your fork. Affects CLI banner, config paths, and environment variable names.
 
 ### Path Resolution
 
-The codebase supports three execution modes:
-- **npm**: Running via `node dist/cli.js` after npm install
-- **Bun binary**: Standalone compiled binary with files alongside
-- **tsx**: Running directly from source via `npx tsx src/cli.ts`
+Three execution modes: npm install, standalone binary, tsx from source.
 
-All path resolution for package assets (package.json, README.md, CHANGELOG.md, themes) must go through `src/paths.ts`:
+**Always use `src/paths.ts`** for package assets:
 
 ```typescript
-import { getPackageDir, getThemeDir, getPackageJsonPath, getReadmePath, getChangelogPath } from "./paths.js";
+import { getPackageDir, getThemeDir } from "./paths.js";
 ```
 
-**Never use `__dirname` directly** for resolving package assets. The `paths.ts` module handles the differences between execution modes automatically.
+Never use `__dirname` directly for package assets.
 
 ### Debug Command
 
-The `/debug` command is a hidden development feature (not shown in autocomplete) that writes all currently rendered lines with their visible widths and ANSI escape sequences to `~/.pi/agent/pi-debug.log`. This is useful for debugging TUI rendering issues, especially when lines don't extend to the terminal edge or contain unexpected invisible characters.
+`/debug` (hidden) writes rendered lines with ANSI codes to `~/.pi/agent/pi-debug.log` for TUI debugging, as well as the last set of messages that were sent to the LLM.
 
-```
-/debug
-```
+For architecture and contribution guidelines, see [DEVELOPMENT.md](./DEVELOPMENT.md).
 
-The debug log includes:
-- Terminal width at time of capture
-- Total number of rendered lines
-- Each line with its index, visible width, and JSON-escaped content showing all ANSI codes
+---
 
 ## License
 
@@ -1285,5 +900,5 @@ MIT
 
 ## See Also
 
-- [@mariozechner/pi-ai](https://www.npmjs.com/package/@mariozechner/pi-ai): Core LLM toolkit with multi-provider support
-- [@mariozechner/pi-agent](https://www.npmjs.com/package/@mariozechner/pi-agent): Agent framework with tool execution
+- [@mariozechner/pi-ai](https://www.npmjs.com/package/@mariozechner/pi-ai): Core LLM toolkit
+- [@mariozechner/pi-agent](https://www.npmjs.com/package/@mariozechner/pi-agent): Agent framework
