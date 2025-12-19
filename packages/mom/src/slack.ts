@@ -159,6 +159,9 @@ export class SlackBot {
 
 		await this.backfillAllChannels();
 
+		// Respond to any unanswered @mentions from while we were offline
+		await this.respondToUnansweredMentions();
+
 		this.setupEventHandlers();
 		await this.socketClient.start();
 
@@ -553,6 +556,82 @@ export class SlackBot {
 
 		const durationMs = Date.now() - startTime;
 		log.logBackfillComplete(totalMessages, durationMs);
+	}
+
+	/**
+	 * Find and respond to @mentions that occurred while mom was offline.
+	 * Called after backfill but before socket connection.
+	 */
+	private async respondToUnansweredMentions(): Promise<void> {
+		if (!this.botUserId) return;
+
+		const mentionPattern = `<@${this.botUserId}>`;
+		let totalUnanswered = 0;
+
+		for (const [channelId, channel] of this.channels) {
+			const logPath = join(this.workingDir, channelId, "log.jsonl");
+			if (!existsSync(logPath)) continue;
+
+			// Read all messages from log
+			const content = readFileSync(logPath, "utf-8");
+			const lines = content.trim().split("\n").filter(Boolean);
+
+			interface LogMessage {
+				ts: string;
+				user: string;
+				userName?: string;
+				text: string;
+				isBot: boolean;
+				attachments?: Array<{ local: string; original: string }>;
+			}
+
+			const messages: LogMessage[] = [];
+			for (const line of lines) {
+				try {
+					messages.push(JSON.parse(line));
+				} catch {}
+			}
+
+			// Find the timestamp of the last bot message
+			let lastBotTs = "0";
+			for (const msg of messages) {
+				if (msg.isBot && msg.ts > lastBotTs) {
+					lastBotTs = msg.ts;
+				}
+			}
+
+			// Find user messages that:
+			// 1. Are after the last bot message
+			// 2. Contain a mention of this bot
+			// 3. Are not from a bot
+			const unansweredMentions = messages.filter(
+				(msg) => !msg.isBot && msg.ts > lastBotTs && msg.text.includes(mentionPattern),
+			);
+
+			if (unansweredMentions.length === 0) continue;
+
+			log.logInfo(`[${channel.name}] Found ${unansweredMentions.length} unanswered mention(s)`);
+			totalUnanswered += unansweredMentions.length;
+
+			// Process each unanswered mention
+			for (const msg of unansweredMentions) {
+				const event: SlackEvent = {
+					type: "mention",
+					channel: channelId,
+					ts: msg.ts,
+					user: msg.user,
+					text: msg.text.replace(/<@[A-Z0-9]+>/gi, "").trim(),
+					attachments: msg.attachments,
+				};
+
+				log.logInfo(`[${channel.name}] Processing unanswered mention from ${msg.userName || msg.user}`);
+				await this.handler.handleEvent(event, this, false);
+			}
+		}
+
+		if (totalUnanswered > 0) {
+			log.logInfo(`Processed ${totalUnanswered} unanswered mention(s) total`);
+		}
 	}
 
 	// ==========================================================================
