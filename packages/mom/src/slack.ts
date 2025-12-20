@@ -142,8 +142,12 @@ export class SlackBot {
 		this.handler = handler;
 		this.workingDir = config.workingDir;
 		this.store = config.store;
-		this.socketClient = new SocketModeClient({ appToken: config.appToken });
-		this.webClient = new WebClient(config.botToken);
+		const slackApiUrl = process.env.MOM_SLACK_API_URL;
+		this.socketClient = new SocketModeClient({
+			appToken: config.appToken,
+			clientOptions: slackApiUrl ? { slackApiUrl } : undefined,
+		});
+		this.webClient = new WebClient(config.botToken, slackApiUrl ? { slackApiUrl } : undefined);
 	}
 
 	// ==========================================================================
