@@ -262,16 +262,20 @@ export class EventsWatcher {
 		const filePath = join(this.eventsDir, filename);
 
 		// Check if stale (created before harness started)
-		try {
-			const stat = statSync(filePath);
-			if (stat.mtimeMs < this.startTime) {
-				log.logInfo(`Stale immediate event, deleting: ${filename}`);
-				this.markProcessed(filename);
+		// Skip stale check in INBOX_MODE - process all events regardless of age
+		const inboxMode = process.env.INBOX_MODE === "true";
+		if (!inboxMode) {
+			try {
+				const stat = statSync(filePath);
+				if (stat.mtimeMs < this.startTime) {
+					log.logInfo(`Stale immediate event, deleting: ${filename}`);
+					this.markProcessed(filename);
+					return;
+				}
+			} catch {
+				// File may have been deleted
 				return;
 			}
-		} catch {
-			// File may have been deleted
-			return;
 		}
 
 		log.logInfo(`Executing immediate event: ${filename}`);
