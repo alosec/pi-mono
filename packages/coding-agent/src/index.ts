@@ -77,12 +77,19 @@ export { messageTransformer } from "./core/messages.js";
 export { findModel, getApiKeyForModel, getAvailableModels } from "./core/model-config.js";
 export {
 	getOAuthProviders,
+	getOAuthToken,
 	login,
 	logout,
 	type OAuthAuthInfo,
 	type OAuthPrompt,
+	refreshToken,
 	type SupportedOAuthProvider,
 } from "./core/oauth/index.js";
+export {
+	loadOAuthCredentials,
+	type OAuthCredentials,
+	saveOAuthCredentials,
+} from "./core/oauth/storage.js";
 export {
 	type CompactionEntry,
 	createSummaryMessage,

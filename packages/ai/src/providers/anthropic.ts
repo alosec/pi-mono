@@ -288,6 +288,9 @@ function createClient(
 		betaFeatures.push("interleaved-thinking-2025-05-14");
 	}
 
+	// Allow environment variable to override baseUrl (for proxy scenarios)
+	const baseURL = process.env.ANTHROPIC_BASE_URL || model.baseUrl;
+
 	if (apiKey.includes("sk-ant-oat")) {
 		const defaultHeaders = {
 			accept: "application/json",
@@ -299,7 +302,7 @@ function createClient(
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
-			baseURL: model.baseUrl,
+			baseURL,
 			defaultHeaders,
 			dangerouslyAllowBrowser: true,
 		});
@@ -315,7 +318,7 @@ function createClient(
 
 		const client = new Anthropic({
 			apiKey,
-			baseURL: model.baseUrl,
+			baseURL,
 			dangerouslyAllowBrowser: true,
 			defaultHeaders,
 		});

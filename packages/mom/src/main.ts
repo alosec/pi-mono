@@ -6,6 +6,7 @@ import { syncLogToContext } from "./context.js";
 import { downloadChannel } from "./download.js";
 import { createEventsWatcher } from "./events.js";
 import * as log from "./log.js";
+import * as oauth from "./oauth.js";
 import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
 import { type MomHandler, type SlackBot, SlackBot as SlackBotClass, type SlackEvent } from "./slack.js";
 import { ChannelStore } from "./store.js";
@@ -74,9 +75,19 @@ if (!parsedArgs.workingDir) {
 
 const { workingDir, sandbox } = { workingDir: parsedArgs.workingDir, sandbox: parsedArgs.sandbox };
 
-if (!MOM_SLACK_APP_TOKEN || !MOM_SLACK_BOT_TOKEN || (!ANTHROPIC_API_KEY && !ANTHROPIC_OAUTH_TOKEN)) {
-	console.error("Missing env: MOM_SLACK_APP_TOKEN, MOM_SLACK_BOT_TOKEN, ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN");
+// Check for Slack tokens (always required)
+if (!MOM_SLACK_APP_TOKEN || !MOM_SLACK_BOT_TOKEN) {
+	console.error("Missing env: MOM_SLACK_APP_TOKEN, MOM_SLACK_BOT_TOKEN");
 	process.exit(1);
+}
+
+// Check for Anthropic auth - can be env vars OR OAuth
+const hasOAuthCredentials = oauth.isLoggedIn(workingDir);
+const hasEnvCredentials = !!(ANTHROPIC_API_KEY || ANTHROPIC_OAUTH_TOKEN);
+
+if (!hasOAuthCredentials && !hasEnvCredentials) {
+	console.log("No Anthropic credentials found. Users can authenticate with /login command.");
+	console.log("Alternatively, set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN environment variable.");
 }
 
 await validateSandbox(sandbox);
@@ -271,6 +282,63 @@ const handler: MomHandler = {
 	async handleEvent(event: SlackEvent, slack: SlackBot, isEvent?: boolean): Promise<void> {
 		const state = getState(event.channel);
 		const channelDir = join(workingDir, event.channel);
+		const text = event.text.trim();
+
+		// ========================================================================
+		// OAuth commands - handle before agent
+		// ========================================================================
+
+		// /login - start OAuth flow
+		if (text === "/login" || text === "/login anthropic") {
+			const authUrl = oauth.startLogin(event.channel);
+			await slack.postMessage(
+				event.channel,
+				`*Login to Anthropic*\n\n` +
+					`1. Open this URL:\n${authUrl}\n\n` +
+					`2. Sign in and authorize\n\n` +
+					`3. Copy the code and paste it here\n\n` +
+					`_The code looks like: abc123...#xyz789..._`,
+			);
+			return;
+		}
+
+		// /logout - clear credentials
+		if (text === "/logout" || text === "/logout anthropic") {
+			oauth.removeCredentials(workingDir);
+			await slack.postMessage(event.channel, "✓ Logged out of Anthropic");
+			return;
+		}
+
+		// /auth-status - check login status
+		if (text === "/auth-status" || text === "/auth") {
+			const loggedIn = oauth.isLoggedIn(workingDir);
+			const hasEnvKey = !!(process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
+			const status = loggedIn
+				? "✓ Logged in via OAuth"
+				: hasEnvKey
+					? "Using API key from environment"
+					: "✗ Not authenticated. Use /login to authenticate.";
+			await slack.postMessage(event.channel, status);
+			return;
+		}
+
+		// Check for pending auth code (looks like "code#state")
+		if (oauth.hasPendingAuth(event.channel) && text.includes("#") && !text.startsWith("/")) {
+			const result = await oauth.completeLogin(event.channel, text, workingDir);
+			if (result.success) {
+				await slack.postMessage(
+					event.channel,
+					"✓ Successfully logged in to Anthropic!\n\nYou can now use Claude without an API key.",
+				);
+			} else {
+				await slack.postMessage(event.channel, `✗ Login failed: ${result.error}`);
+			}
+			return;
+		}
+
+		// ========================================================================
+		// Normal message handling
+		// ========================================================================
 
 		// Start run
 		state.running = true;

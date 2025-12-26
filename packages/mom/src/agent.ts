@@ -12,6 +12,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { MomSessionManager, MomSettingsManager } from "./context.js";
 import * as log from "./log.js";
+import * as oauth from "./oauth.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelInfo, SlackContext, UserInfo } from "./slack.js";
 import type { ChannelStore } from "./store.js";
@@ -56,10 +57,20 @@ export interface AgentRunner {
 	abort(): void;
 }
 
-function getAnthropicApiKey(): string {
+async function getAnthropicApiKey(workingDir: string): Promise<string> {
+	// Try OAuth token from mom's storage first (with auto-refresh)
+	const oauthToken = await oauth.getOAuthToken(workingDir);
+	if (oauthToken) {
+		return oauthToken;
+	}
+
+	// Fall back to environment variables
 	const key = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
 	if (!key) {
-		throw new Error("ANTHROPIC_OAUTH_TOKEN or ANTHROPIC_API_KEY must be set");
+		throw new Error(
+			"Not authenticated. Use /login to authenticate with Anthropic, " +
+				"or set ANTHROPIC_API_KEY environment variable.",
+		);
 	}
 	return key;
 }
@@ -409,6 +420,7 @@ export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: strin
 function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
 	const executor = createExecutor(sandboxConfig);
 	const workspacePath = executor.getWorkspacePath(channelDir.replace(`/${channelId}`, ""));
+	const workingDir = join(channelDir, ".."); // Parent of channel dir is the working dir
 
 	// Create tools
 	const tools = createMomTools(executor);
@@ -425,7 +437,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		id: model.id,
 		thinkingLevel: "off",
 	});
-	const settingsManager = new MomSettingsManager(join(channelDir, ".."));
+	const settingsManager = new MomSettingsManager(workingDir);
 
 	// Create agent
 	const agent = new Agent({
@@ -437,7 +449,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		},
 		messageTransformer,
 		transport: new ProviderTransport({
-			getApiKey: async () => getAnthropicApiKey(),
+			getApiKey: async () => getAnthropicApiKey(workingDir),
 		}),
 	});
 
