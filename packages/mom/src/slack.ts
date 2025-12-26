@@ -133,6 +133,7 @@ export class SlackBot {
 	private workingDir: string;
 	private store: ChannelStore;
 	private botUserId: string | null = null;
+	private botUserName: string | null = null;
 	private startupTs: string | null = null; // Messages older than this are just logged, not processed
 
 	private users = new Map<string, SlackUser>();
@@ -164,6 +165,7 @@ export class SlackBot {
 	async start(): Promise<void> {
 		const auth = await this.webClient.auth.test();
 		this.botUserId = auth.user_id as string;
+		this.botUserName = (auth.user as string) || "mom";
 
 		await Promise.all([this.fetchUsers(), this.fetchChannels()]);
 		log.logInfo(`Loaded ${this.channels.size} channels, ${this.users.size} users`);
@@ -345,7 +347,7 @@ export class SlackBot {
 
 			// SYNC: Check if busy
 			if (this.handler.isRunning(e.channel)) {
-				this.postMessage(e.channel, "_Already working. Say `@mom stop` to cancel._");
+				this.postMessage(e.channel, `_Already working. Say \`@${this.botUserName} stop\` to cancel._`);
 			} else {
 				this.getQueue(e.channel).enqueue(() => this.handler.handleEvent(slackEvent, this));
 			}
