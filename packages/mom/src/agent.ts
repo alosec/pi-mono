@@ -61,6 +61,7 @@ async function getAnthropicApiKey(workingDir: string): Promise<string> {
 	// Try OAuth token from mom's storage first (with auto-refresh)
 	const oauthToken = await oauth.getOAuthToken(workingDir);
 	if (oauthToken) {
+		log.logInfo("Using OAuth token from .mom/oauth.json");
 		return oauthToken;
 	}
 
@@ -72,6 +73,7 @@ async function getAnthropicApiKey(workingDir: string): Promise<string> {
 				"or set ANTHROPIC_API_KEY environment variable.",
 		);
 	}
+	log.logInfo("Using API key from environment variable");
 	return key;
 }
 
