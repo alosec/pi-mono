@@ -2,6 +2,7 @@
 
 import { join, resolve } from "path";
 import { type AgentRunner, getOrCreateRunner } from "./agent.js";
+import { tryHandleCommand } from "./commands.js";
 import { syncLogToContext } from "./context.js";
 import { downloadChannel } from "./download.js";
 import { createEventsWatcher } from "./events.js";
@@ -253,6 +254,16 @@ const handler: MomHandler = {
 	},
 
 	async handleEvent(event: SlackEvent, slack: SlackBot, isEvent?: boolean): Promise<void> {
+		// Check for commands first
+		const cmdResult = await tryHandleCommand({
+			channelId: event.channel,
+			text: event.text,
+			slack,
+		});
+		if (cmdResult.handled) {
+			return;
+		}
+
 		const state = getState(event.channel);
 		const channelDir = join(workingDir, event.channel);
 

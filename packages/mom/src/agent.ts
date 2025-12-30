@@ -2,7 +2,7 @@ import { Agent, type AgentEvent, type Attachment, ProviderTransport } from "@mar
 import { getModel } from "@mariozechner/pi-ai";
 import {
 	AgentSession,
-	AuthStorage,
+	type AuthStorage,
 	formatSkillsForPrompt,
 	loadSkillsFromDir,
 	ModelRegistry,
@@ -11,8 +11,8 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync, statSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
-import { homedir } from "os";
 import { join } from "path";
+import { getAuthStorage } from "./auth.js";
 import { MomSessionManager, MomSettingsManager } from "./context.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
@@ -44,8 +44,7 @@ async function getAnthropicApiKey(authStorage: AuthStorage): Promise<string> {
 	if (!key) {
 		throw new Error(
 			"No API key found for anthropic.\n\n" +
-				"Set an API key environment variable, or use /login with Anthropic and link to auth.json from " +
-				join(homedir(), ".pi", "mom", "auth.json"),
+				"Set ANTHROPIC_API_KEY environment variable, or use /login to authenticate with Anthropic.",
 		);
 	}
 	return key;
@@ -421,9 +420,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const sessionManager = new MomSessionManager(channelDir);
 	const settingsManager = new MomSettingsManager(join(channelDir, ".."));
 
-	// Create AuthStorage and ModelRegistry
+	// Get shared AuthStorage and create ModelRegistry
 	// Auth stored outside workspace so agent can't access it
-	const authStorage = new AuthStorage(join(homedir(), ".pi", "mom", "auth.json"));
+	const authStorage = getAuthStorage();
 	const modelRegistry = new ModelRegistry(authStorage);
 
 	// Create agent
